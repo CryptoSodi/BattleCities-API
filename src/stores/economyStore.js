@@ -266,6 +266,151 @@ async function debitTokens(player, amount) {
   return account;
 }
 
+// Fuel used to enter multiplayer matches must be changed by the API, not by
+// a client account snapshot. Callers wrap this in the same transaction as the
+// room assignment so a charge can never exist without its match membership.
+async function debitFuel(player, amount, context = {}) {
+  if (!isValidPlayer(player)) {
+    throw new Error('Invalid player');
+  }
+
+  const safeAmount = Math.floor(Number(amount));
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    return null;
+  }
+
+  return database.withTransaction(async () => {
+    let account;
+    if (hasPersistentConfig()) {
+      account = await lockAccountForFuelMutation(player);
+      if (player.provider !== 'guest') {
+        const updated = await getPgPool().query(
+          `
+            UPDATE ${TABLE_NAME}
+            SET fuel_balance = fuel_balance - $2, updated_at = $3
+            WHERE player_id = $1 AND fuel_balance >= $2
+            RETURNING player_id, provider, wallet_address, token_balance,
+              sol_balance, fuel_balance, inventory_json, loadout_json,
+              created_at, updated_at
+          `,
+          [player.id, safeAmount, new Date().toISOString()],
+        );
+        if (updated.rowCount === 0) {
+          return null;
+        }
+        account = normalizeAccount(fromRow(updated.rows[0]));
+      }
+    } else {
+      account = await ensureAccountForPlayer(player);
+      if (player.provider !== 'guest') {
+        if (account.fuelBalance < safeAmount) {
+          return null;
+        }
+        account.fuelBalance -= safeAmount;
+        account.updatedAt = new Date().toISOString();
+        await writeAccount(account);
+      }
+    }
+
+    if (player.provider !== 'guest') {
+      await ledgerStore.appendEntries({
+        playerId: player.id,
+        walletAddress: player.walletAddress || null,
+        currency: 'fuel',
+        amount: -safeAmount,
+        reason: context.reason || 'multiplayer-entry',
+        sourceType: context.sourceType || 'multiplayer-match',
+        sourceId: context.sourceId || null,
+        eventId: context.eventId || null,
+      });
+    }
+    return account;
+  });
+}
+
+async function creditFuel(player, amount, context = {}) {
+  if (!isValidPlayer(player)) {
+    throw new Error('Invalid player');
+  }
+
+  const safeAmount = Math.floor(Number(amount));
+  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
+    return ensureAccountForPlayer(player);
+  }
+
+  return database.withTransaction(async () => {
+    let account;
+    if (hasPersistentConfig()) {
+      account = await lockAccountForFuelMutation(player);
+      if (player.provider !== 'guest') {
+        const updated = await getPgPool().query(
+          `
+            UPDATE ${TABLE_NAME}
+            SET fuel_balance = fuel_balance + $2, updated_at = $3
+            WHERE player_id = $1
+            RETURNING player_id, provider, wallet_address, token_balance,
+              sol_balance, fuel_balance, inventory_json, loadout_json,
+              created_at, updated_at
+          `,
+          [player.id, safeAmount, new Date().toISOString()],
+        );
+        account = normalizeAccount(fromRow(updated.rows[0]));
+      }
+    } else {
+      account = await ensureAccountForPlayer(player);
+      if (player.provider !== 'guest') {
+        account.fuelBalance += safeAmount;
+        account.updatedAt = new Date().toISOString();
+        await writeAccount(account);
+      }
+    }
+
+    if (player.provider !== 'guest') {
+      await ledgerStore.appendEntries({
+        playerId: player.id,
+        walletAddress: player.walletAddress || null,
+        currency: 'fuel',
+        amount: safeAmount,
+        reason: context.reason || 'multiplayer-refund',
+        sourceType: context.sourceType || 'multiplayer-match',
+        sourceId: context.sourceId || null,
+        eventId: context.eventId || null,
+      });
+    }
+    return account;
+  });
+}
+
+async function lockAccountForFuelMutation(player) {
+  await ensureSchema();
+  let result = await getPgPool().query(
+    `
+      SELECT player_id, provider, wallet_address, token_balance,
+        sol_balance, fuel_balance, inventory_json, loadout_json,
+        created_at, updated_at
+      FROM ${TABLE_NAME}
+      WHERE player_id = $1
+      FOR UPDATE
+    `,
+    [player.id],
+  );
+  if (result.rowCount === 0) {
+    await ensureAccountForPlayer(player);
+    result = await getPgPool().query(
+      `
+        SELECT player_id, provider, wallet_address, token_balance,
+          sol_balance, fuel_balance, inventory_json, loadout_json,
+          created_at, updated_at
+        FROM ${TABLE_NAME}
+        WHERE player_id = $1
+        FOR UPDATE
+      `,
+      [player.id],
+    );
+  }
+  return normalizeAccount(fromRow(result.rows[0]));
+}
+
 // Credits soft rewards (fuel/token) to a player's account — used by quest
 // claims and other reward flows. The CALLER is responsible for the matching
 // ledger entries (it knows the reason/source context).
@@ -590,7 +735,9 @@ function isValidPlayer(value) {
 }
 
 module.exports = {
+  creditFuel,
   creditRewards,
+  debitFuel,
   debitTokens,
   ensureAccountForPlayer,
   purchaseItemForPlayer,

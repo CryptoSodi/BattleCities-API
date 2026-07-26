@@ -12,6 +12,9 @@ import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
 import * as matchSubmit from '../routes/matches/submit';
+import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
+import * as multiplayerEvents from '../routes/multiplayer/events';
+import * as multiplayerMatches from '../routes/multiplayer/matches';
 import * as phases from '../routes/phases';
 import * as player from '../routes/player';
 import * as quests from '../routes/quests';
@@ -53,6 +56,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'events/leaderboard': eventLeaderboard,
   health,
   'matches/submit': matchSubmit,
+  'multiplayer/direct/start': multiplayerDirectStart,
   phases,
   player,
   quests,
@@ -76,6 +80,12 @@ const webrtcSignalRoutePattern =
   /^webrtc\/matches\/([^/]+)\/players\/([^/]+)\/signals\/([^/]+)$/;
 const webrtcObserverRoutePattern =
   /^webrtc\/matches\/([^/]+)\/observers$/;
+const multiplayerMatchRoutePattern =
+  /^multiplayer\/matches\/([^/]+)$/;
+const multiplayerMatchActionRoutePattern =
+  /^multiplayer\/matches\/([^/]+)\/([^/]+)$/;
+const multiplayerEventRoutePattern =
+  /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
 
 function resolveRoute(request: Request): string {
   const url = new URL(request.url);
@@ -90,6 +100,58 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  if (route === 'multiplayer/matches/live') {
+    if (request.method.toUpperCase() === 'GET') {
+      return multiplayerMatches.GET(request);
+    }
+    if (request.method.toUpperCase() === 'OPTIONS') {
+      return multiplayerMatches.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, OPTIONS');
+  }
+
+  const multiplayerEventMatch = route.match(multiplayerEventRoutePattern);
+  if (multiplayerEventMatch !== null) {
+    const [, eventId, action] = multiplayerEventMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return multiplayerEvents.GET(request, eventId, action);
+    }
+    if (method === 'POST') {
+      return multiplayerEvents.POST(request, eventId, action);
+    }
+    if (method === 'OPTIONS') {
+      return multiplayerEvents.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, POST, OPTIONS');
+  }
+
+  const multiplayerMatchAction = route.match(multiplayerMatchActionRoutePattern);
+  if (multiplayerMatchAction !== null) {
+    const [, matchId, action] = multiplayerMatchAction;
+    const method = request.method.toUpperCase();
+    if (method === 'POST') {
+      return multiplayerMatches.POST(request, matchId, action);
+    }
+    if (method === 'OPTIONS') {
+      return multiplayerMatches.OPTIONS(request);
+    }
+    return methodNotAllowed('POST, OPTIONS');
+  }
+
+  const multiplayerMatch = route.match(multiplayerMatchRoutePattern);
+  if (multiplayerMatch !== null) {
+    const [, matchId] = multiplayerMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return multiplayerMatches.GET(request, matchId);
+    }
+    if (method === 'OPTIONS') {
+      return multiplayerMatches.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, OPTIONS');
+  }
+
   const webrtcObserverMatch = route.match(webrtcObserverRoutePattern);
   if (webrtcObserverMatch !== null) {
     const [, matchId] = webrtcObserverMatch;
@@ -156,6 +218,16 @@ async function dispatch(request: Request): Promise<Response> {
     status: 405,
     headers: {
       allow: Object.keys(routeModule).join(', '),
+      'content-type': 'application/json',
+    },
+  });
+}
+
+function methodNotAllowed(allow: string): Response {
+  return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    status: 405,
+    headers: {
+      allow,
       'content-type': 'application/json',
     },
   });

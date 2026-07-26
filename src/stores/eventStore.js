@@ -34,6 +34,7 @@ const EVENT_DEFINITIONS = [
     description: 'COMPLETE OPERATIONS. COLLECT MEDALS. CLIMB THE RANKS.',
     startsAt: '2026-07-01T00:00:00.000Z',
     endsAt: '2026-08-15T00:00:00.000Z',
+    entryFuelCost: 1,
     prizePool: '10000 BACT',
     currency: 'medals',
     quests: [
@@ -138,6 +139,7 @@ function toPublicEvent(event) {
     startsAt: event.startsAt,
     endsAt: event.endsAt,
     status: resolveEventStatus(event),
+    entryFuelCost: Math.max(0, Math.floor(Number(event.entryFuelCost) || 0)),
     prizePool: event.prizePool,
     currency: event.currency,
     rewardTracks: event.rewardTracks,

@@ -85,6 +85,37 @@ Useful variables:
   frontend Vercel project.
 - `BATTLECITY_WEB_BASE_URL`: game origin used after API-hosted OAuth callbacks;
   set it to `https://www.battlecities.com` in production.
+- `BATTLECITY_EVENT_ADMIN_SECRET`: bearer token required to approve final event
+  prize allocations after an event ends.
+
+## Multiplayer API
+
+Direct matchmaking consumes one unit of the authenticated player's server-side
+fuel balance. Event admission consumes the configured event fuel cost once and
+is never refundable. Reconnection reuses the existing membership without a new
+fuel charge, and public observers never occupy a player slot.
+
+```text
+POST /api/multiplayer/direct/start
+GET  /api/multiplayer/matches/live
+GET  /api/multiplayer/matches/:matchId
+POST /api/multiplayer/matches/:matchId/reconnect
+POST /api/multiplayer/matches/:matchId/started
+POST /api/multiplayer/matches/:matchId/exit
+POST /api/multiplayer/matches/:matchId/observe
+POST /api/multiplayer/matches/:matchId/score
+
+POST /api/events/:eventId/enter
+POST /api/events/:eventId/start
+GET  /api/events/:eventId/leaderboard
+POST /api/events/:eventId/prizes/approve
+```
+
+Normal waiting-room exits refund the fuel charged for that match. Event entry
+fuel is not refunded. Submitted scores remain pending validation; event
+leaderboards retain each real player's best non-rejected score and give tied
+scores the same rank. Prize approval records an explicit administrator-supplied
+allocation and does not transfer funds automatically.
 
 Do not add new HTTP behavior to the root route copies. New API work belongs in
 `api-server/src/routes`, with supporting code in `config`, `middleware`,

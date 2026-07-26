@@ -49,6 +49,24 @@ test('hardening migration contains indexes, foreign keys, and checks', async () 
   assert.match(sql, /battlecity_webrtc_signal_route_check/);
 });
 
+test('multiplayer migration owns matchmaking, score, and prize tables', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/003_multiplayer.sql'),
+    'utf8',
+  );
+  [
+    'battlecity_multiplayer_matches',
+    'battlecity_multiplayer_participants',
+    'battlecity_multiplayer_event_entries',
+    'battlecity_multiplayer_scores',
+    'battlecity_event_prize_approvals',
+  ].forEach((table) => {
+    assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`));
+  });
+  assert.match(sql, /UNIQUE \(match_id, player_slot\)/);
+  assert.match(sql, /fuel_refunded <= fuel_charged/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {
