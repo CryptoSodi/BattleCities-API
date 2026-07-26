@@ -18,6 +18,7 @@
     "clean": "node scripts/clean.mjs",
     "db:check": "node scripts/check-database.mjs",
     "db:migrate": "node scripts/migrate.mjs",
+    "deploy:migrate": "node scripts/migrate-deploy.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:local": "node scripts/smoke-local.mjs",
     "setup:check": "node scripts/check-setup.mjs",

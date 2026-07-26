@@ -47,6 +47,15 @@ function getPool() {
   };
 }
 
+async function withClient(operation) {
+  const client = await getRawPool().connect();
+  try {
+    return await operation(client);
+  } finally {
+    client.release();
+  }
+}
+
 async function withTransaction(operation) {
   if (!storageConfig.hasDatabaseConfig() || transactionStorage.getStore()) {
     return operation();
@@ -161,5 +170,6 @@ module.exports = {
   closePool,
   getPool,
   getReadiness,
+  withClient,
   withTransaction,
 };

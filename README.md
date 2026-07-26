@@ -38,8 +38,9 @@ Create a separate Vercel project from this repository with these settings:
 - Root Directory: `api-server`
 - Framework Preset: `Other`
 - Build and Output settings: leave the project defaults unchanged; the
-  package's `vercel.json` disables the static build and deploys `api/router.ts`
-  as a Vercel Function.
+  package's `vercel.json` runs production database migrations and deploys
+  `api/router.ts` as a Vercel Function. Preview builds skip migrations so they
+  cannot change the production schema.
 
 Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `GOOGLE_OAUTH_STATE_SECRET`, and `BATTLECITY_WEB_BASE_URL` in the API project.
@@ -57,6 +58,10 @@ https://api.battlecities.com/api/ready
 
 The frontend Vercel project must set
 `BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
+
+Production migration builds use a PostgreSQL advisory lock, so overlapping
+deployments wait for one another instead of applying the same migration
+concurrently. Failed migrations stop the deployment before it is published.
 
 Database migrations, readiness checks, and the schema/fallback inventory are
 documented in [`docs/database.md`](docs/database.md).

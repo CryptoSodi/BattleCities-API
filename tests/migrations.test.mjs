@@ -61,3 +61,35 @@ test('stores use migrations and the shared pool instead of request-time DDL', as
     }
   }
 });
+
+test('migration runner serializes concurrent deployments', async () => {
+  const source = await fs.readFile(
+    path.join(packageRoot, 'scripts/migrate.mjs'),
+    'utf8',
+  );
+  assert.match(source, /pg_advisory_lock/);
+  assert.match(source, /pg_advisory_unlock/);
+  assert.match(source, /BEGIN/);
+  assert.match(source, /ROLLBACK/);
+});
+
+test('Vercel runs migrations only for production deployments', async () => {
+  const deploySource = await fs.readFile(
+    path.join(packageRoot, 'scripts/migrate-deploy.mjs'),
+    'utf8',
+  );
+  const packageJson = JSON.parse(
+    await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'),
+  );
+  const vercelConfig = JSON.parse(
+    await fs.readFile(path.join(packageRoot, 'vercel.json'), 'utf8'),
+  );
+
+  assert.match(deploySource, /VERCEL_ENV/);
+  assert.match(deploySource, /environment === 'production'/);
+  assert.equal(
+    packageJson.scripts['deploy:migrate'],
+    'node scripts/migrate-deploy.mjs',
+  );
+  assert.equal(vercelConfig.buildCommand, 'npm run deploy:migrate');
+});
