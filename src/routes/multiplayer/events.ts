@@ -4,7 +4,7 @@ declare const process: any;
 import {
   DEFAULT_EVENT_ENTRY_FUEL_COST,
   EventPrizeAllocation,
-} from '@battlecities/shared';
+} from '../../../../shared/src';
 import {
   createJsonResponse,
   createOptionsResponse,

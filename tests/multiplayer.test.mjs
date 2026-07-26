@@ -4,8 +4,24 @@ import os from 'os';
 import path from 'path';
 import { createRequire } from 'module';
 import test from 'node:test';
+import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
+const testDirectory = path.dirname(fileURLToPath(import.meta.url));
+
+test('multiplayer API routes use deployable shared-code imports', async () => {
+  const routeDirectory = path.resolve(testDirectory, '../src/routes/multiplayer');
+  const routeFiles = await fs.readdir(routeDirectory);
+
+  for (const routeFile of routeFiles.filter((file) => file.endsWith('.ts'))) {
+    const source = await fs.readFile(path.join(routeDirectory, routeFile), 'utf8');
+    assert.doesNotMatch(
+      source,
+      /['"]@battlecities\/shared['"]/,
+      `${routeFile} must not use a TypeScript-only path alias at runtime`,
+    );
+  }
+});
 
 test('direct matchmaking charges fuel, fills two slots, and refunds waiting exits', async () => {
   const context = await createContext();

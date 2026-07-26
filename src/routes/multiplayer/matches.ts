@@ -1,6 +1,6 @@
 declare const require: any;
 
-import { isMatchId } from '@battlecities/shared';
+import { isMatchId } from '../../../../shared/src';
 import {
   createJsonResponse,
   createOptionsResponse,

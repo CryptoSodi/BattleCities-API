@@ -1,6 +1,6 @@
 declare const require: any;
 
-import { DIRECT_MATCH_FUEL_COST } from '@battlecities/shared';
+import { DIRECT_MATCH_FUEL_COST } from '../../../../shared/src';
 import {
   createJsonResponse,
   createOptionsResponse,
