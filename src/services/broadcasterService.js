@@ -52,7 +52,9 @@ async function ensureMatchStarted(matchId, level) {
   }
 
   const body = await readJson(response);
-  const workerUrl = normalizeWorkerUrl(body?.workerUrl || body?.url);
+  const workerUrl = normalizeWorkerUrl(
+    body?.workerUrl || body?.statusUrl || body?.url,
+  );
   await multiplayerStore.setBroadcasterState(matchId, 'running', workerUrl);
   return multiplayerStore.getBroadcasterState(matchId);
 }

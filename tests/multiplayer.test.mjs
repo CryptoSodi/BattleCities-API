@@ -21,6 +21,21 @@ test('multiplayer API routes use deployable shared-code imports', async () => {
       `${routeFile} must not use a TypeScript-only path alias at runtime`,
     );
   }
+
+  const signalingSource = await fs.readFile(
+    path.resolve(testDirectory, '../src/routes/webrtcSignals.ts'),
+    'utf8',
+  );
+  assert.match(signalingSource, /authorizePlayerJoin/);
+  assert.match(signalingSource, /resolveSessionPlayer/);
+  assert.match(signalingSource, /broadcasterService\.isAuthorizedRequest/);
+
+  const matchRouteSource = await fs.readFile(
+    path.join(routeDirectory, 'matches.ts'),
+    'utf8',
+  );
+  assert.match(matchRouteSource, /Only the broadcaster may submit match results/);
+  assert.match(matchRouteSource, /completeAuthoritativeMatch/);
 });
 
 test('direct matchmaking charges fuel, fills two slots, and refunds waiting exits', async () => {
@@ -41,6 +56,24 @@ test('direct matchmaking charges fuel, fills two slots, and refunds waiting exit
   assert.equal(second.match.status, 'ready');
   assert.equal(third.playerSlot, 0);
   assert.notEqual(third.match.id, first.match.id);
+  assert.equal(
+    await context.multiplayer.authorizePlayerJoin(
+      one.id,
+      first.match.id,
+      0,
+      first.joinToken,
+    ),
+    true,
+  );
+  assert.equal(
+    await context.multiplayer.authorizePlayerJoin(
+      one.id,
+      first.match.id,
+      1,
+      first.joinToken,
+    ),
+    false,
+  );
 
   const reconnected = await context.multiplayer.reconnect(one, first.match.id);
   assert.equal(reconnected.reconnected, true);
@@ -51,6 +84,76 @@ test('direct matchmaking charges fuel, fills two slots, and refunds waiting exit
   assert.equal(exited.ok, true);
   assert.equal(exited.refundedFuel, 1);
   assert.equal((await context.economy.readAccount(three.id)).fuelBalance, 3);
+});
+
+test('broadcaster startup and shutdown are idempotent and persist lifecycle state', async () => {
+  const context = await createContext();
+  const [one, two] = context.players;
+  await context.economy.creditFuel(one, 1, { sourceId: 'broadcaster-one' });
+  await context.economy.creditFuel(two, 1, { sourceId: 'broadcaster-two' });
+  const first = await context.multiplayer.startDirectMatch(one, 1);
+  await context.multiplayer.startDirectMatch(two, 1);
+
+  const previousFetch = globalThis.fetch;
+  const previousBaseUrl = process.env.BROADCASTER_BASE_URL;
+  const previousToken = process.env.BROADCASTER_SERVICE_TOKEN;
+  const calls = [];
+  process.env.BROADCASTER_BASE_URL = 'https://broadcaster.example.test';
+  process.env.BROADCASTER_SERVICE_TOKEN = 'test-service-token';
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return init?.method === 'DELETE'
+      ? new Response(null, { status: 204 })
+      : new Response(JSON.stringify({ workerUrl: 'http://127.0.0.1:9010/' }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        });
+  };
+
+  try {
+    const broadcaster = require('../src/services/broadcasterService');
+    assert.equal(
+      broadcaster.isAuthorizedRequest(
+        new Request('https://api.example.test', {
+          headers: { authorization: 'Bearer test-service-token' },
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      broadcaster.isAuthorizedRequest(new Request('https://api.example.test')),
+      false,
+    );
+    await broadcaster.ensureMatchStarted(first.match.id, 1);
+    await broadcaster.ensureMatchStarted(first.match.id, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].init.headers.authorization, 'Bearer test-service-token');
+    assert.deepEqual(JSON.parse(calls[0].init.body), {
+      matchId: first.match.id,
+      level: 1,
+    });
+    assert.equal(
+      (await context.multiplayer.getBroadcasterState(first.match.id)).status,
+      'running',
+    );
+
+    await context.multiplayer.completeAuthoritativeMatch(first.match.id, [
+      { playerSlot: 0, score: 500 },
+      { playerSlot: 1, score: 500 },
+    ]);
+    await broadcaster.stopMatch(first.match.id);
+    await broadcaster.stopMatch(first.match.id);
+    assert.equal(calls.length, 2);
+    assert.equal(
+      (await context.multiplayer.getBroadcasterState(first.match.id)).status,
+      'stopped',
+    );
+    assert.equal((await context.multiplayer.getMatch(first.match.id)).status, 'completed');
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnvironment('BROADCASTER_BASE_URL', previousBaseUrl);
+    restoreEnvironment('BROADCASTER_SERVICE_TOKEN', previousToken);
+  }
 });
 
 test('event entry charges once, never refunds, and leaderboard keeps best tied scores', async () => {
@@ -72,9 +175,10 @@ test('event entry charges once, never refunds, and leaderboard keeps best tied s
   assert.equal(joined.match.id, restarted.match.id);
   assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 2);
 
-  await context.multiplayer.submitScore(one, restarted.match.id, 500);
-  await context.multiplayer.submitScore(one, restarted.match.id, 450);
-  await context.multiplayer.submitScore(two, restarted.match.id, 500);
+  await context.multiplayer.completeAuthoritativeMatch(restarted.match.id, [
+    { playerSlot: 0, score: 500 },
+    { playerSlot: 1, score: 500 },
+  ]);
   const board = await context.multiplayer.getEventLeaderboard(event.id);
 
   assert.deepEqual(
@@ -104,4 +208,12 @@ async function createContext() {
       walletAddress: null,
     })),
   };
+}
+
+function restoreEnvironment(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }

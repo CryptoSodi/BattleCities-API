@@ -26,11 +26,22 @@ const status = {
   blob: {
     configured: isConfigured('BLOB_READ_WRITE_TOKEN'),
   },
+  broadcaster: {
+    configured:
+      isConfigured('BROADCASTER_BASE_URL') &&
+      isConfigured('BROADCASTER_SERVICE_TOKEN'),
+    baseUrl: process.env.BROADCASTER_BASE_URL || null,
+    serviceToken: isConfigured('BROADCASTER_SERVICE_TOKEN'),
+  },
 };
 
 console.log(JSON.stringify(status, null, 2));
 
-if (!status.postgres.configured || !status.google.configured) {
+if (
+  !status.postgres.configured ||
+  !status.google.configured ||
+  !status.broadcaster.configured
+) {
   process.exitCode = 1;
 }
 

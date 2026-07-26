@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '003_multiplayer';
+const REQUIRED_MIGRATION = '004_broadcaster_runtime';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

@@ -67,6 +67,18 @@ test('multiplayer migration owns matchmaking, score, and prize tables', async ()
   assert.match(sql, /fuel_refunded <= fuel_charged/);
 });
 
+test('broadcaster migration persists the worker lifecycle without exposing secrets', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/004_broadcaster_runtime.sql'),
+    'utf8',
+  );
+  assert.match(sql, /broadcaster_status/);
+  assert.match(sql, /broadcaster_started_at/);
+  assert.match(sql, /broadcaster_worker_url/);
+  assert.match(sql, /'starting', 'running', 'stopped', 'failed'/);
+  assert.doesNotMatch(sql, /service_token/i);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

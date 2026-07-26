@@ -423,6 +423,9 @@ async function completeAuthoritativeMatch(matchId, scores) {
     if (match === null || match.players.length !== 2) {
       return null;
     }
+    if (match.status === 'completed') {
+      return match;
+    }
     const normalizedScores = normalizeAuthoritativeScores(scores);
     const now = new Date().toISOString();
     if (hasPersistentConfig()) {
@@ -585,7 +588,7 @@ async function getEventLeaderboard(eventId, limit = 100) {
           FROM ${SCORE_TABLE} s
           JOIN battlecity_players p ON p.id = s.player_id
           WHERE s.event_id = $1
-            AND s.validation_status <> 'rejected'
+            AND s.validation_status = 'accepted'
             AND p.provider <> 'guest'
           GROUP BY s.player_id
         )
@@ -612,7 +615,7 @@ async function getEventLeaderboard(eventId, limit = 100) {
     .filter(
       (item) =>
         item.eventId === eventId &&
-        item.validationStatus !== 'rejected' &&
+        item.validationStatus === 'accepted' &&
         item.provider !== 'guest',
     )
     .forEach((item) => {
@@ -1015,10 +1018,18 @@ function normalizeAuthoritativeScores(scores) {
   if (!Array.isArray(scores) || scores.length !== 2) {
     throw createStoreError('INVALID_RESULT', 'Two player scores are required');
   }
-  const normalized = scores.map((entry) => ({
-    playerSlot: Number(entry?.playerSlot),
-    score: clampInteger(entry?.score, 0, MAX_SCORE),
-  }));
+  const normalized = scores.map((entry) => {
+    const playerSlot = Number(entry?.playerSlot);
+    const score = Number(entry?.score);
+    if (
+      !Number.isInteger(score) ||
+      score < 0 ||
+      score > MAX_SCORE
+    ) {
+      throw createStoreError('INVALID_RESULT', 'Invalid authoritative score');
+    }
+    return { playerSlot, score };
+  });
   if (
     normalized.some((entry) => ![0, 1].includes(entry.playerSlot)) ||
     new Set(normalized.map((entry) => entry.playerSlot)).size !== 2
@@ -1054,6 +1065,5 @@ module.exports = {
   setBroadcasterState,
   startDirectMatch,
   startEventMatch,
-  submitScore,
   isPersistentStoreConfigured: hasPersistentConfig,
 };
