@@ -10,9 +10,11 @@ import {
   createOptionsResponse,
   resolveSessionPlayer,
 } from '../_helpers';
+import { createPlayerRuntime } from './_runtime';
 
 const eventStore = require('../../stores/eventStore');
 const multiplayerStore = require('../../stores/multiplayerStore');
+const broadcasterService = require('../../services/broadcasterService');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -75,7 +77,15 @@ export async function POST(
         event,
         fuelCost,
       );
-      return createJsonResponse(request, { ok: true, assignment }, 201);
+      if (assignment.match.status === 'waiting') {
+        return createJsonResponse(request, { ok: true, assignment }, 201);
+      }
+      await broadcasterService.ensureMatchStarted(assignment.match.id, 1);
+      return createJsonResponse(
+        request,
+        { ok: true, assignment, runtime: createPlayerRuntime(request, assignment) },
+        201,
+      );
     }
   } catch (error) {
     if ((error as any)?.code === 'INSUFFICIENT_FUEL') {

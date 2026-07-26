@@ -127,6 +127,9 @@ async function startMatch(player, category, eventId, directFuelCost, eventFuelCo
         category,
         eventId,
         status: 'waiting',
+        broadcasterStatus: null,
+        broadcasterStartedAt: null,
+        broadcasterWorkerUrl: null,
         createdAt: now,
         updatedAt: now,
         startedAt: null,
@@ -312,6 +315,172 @@ async function markStarted(player, matchId) {
     });
   }
   return getMatch(matchId);
+}
+
+async function getBroadcasterState(matchId) {
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `SELECT broadcaster_status, broadcaster_started_at, broadcaster_worker_url
+       FROM ${MATCH_TABLE} WHERE id = $1`,
+      [matchId],
+    );
+    if (result.rowCount === 0) {
+      return null;
+    }
+    const row = result.rows[0];
+    return {
+      status: row.broadcaster_status,
+      startedAt: row.broadcaster_started_at
+        ? new Date(row.broadcaster_started_at).toISOString()
+        : null,
+      workerUrl: row.broadcaster_worker_url,
+    };
+  }
+  const state = await readLocalState();
+  const match = state.matches.find((item) => item.id === matchId);
+  return match === undefined
+    ? null
+    : {
+        status: match.broadcasterStatus || null,
+        startedAt: match.broadcasterStartedAt || null,
+        workerUrl: match.broadcasterWorkerUrl || null,
+      };
+}
+
+async function setBroadcasterState(matchId, status, workerUrl = null) {
+  const startedAt = status === 'running' ? new Date().toISOString() : null;
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `UPDATE ${MATCH_TABLE}
+       SET broadcaster_status = $2,
+           broadcaster_started_at = CASE
+             WHEN $2 = 'running' THEN COALESCE(broadcaster_started_at, $3)
+             ELSE broadcaster_started_at
+           END,
+           broadcaster_worker_url = COALESCE($4, broadcaster_worker_url),
+           updated_at = $3
+       WHERE id = $1
+       RETURNING id`,
+      [matchId, status, startedAt || new Date().toISOString(), workerUrl],
+    );
+    return result.rowCount > 0;
+  }
+  return withLocalLock(async () => {
+    const state = await readLocalState();
+    const match = state.matches.find((item) => item.id === matchId);
+    if (match === undefined) {
+      return false;
+    }
+    match.broadcasterStatus = status;
+    if (status === 'running') {
+      match.broadcasterStartedAt = match.broadcasterStartedAt || startedAt;
+    }
+    if (workerUrl !== null) {
+      match.broadcasterWorkerUrl = workerUrl;
+    }
+    match.updatedAt = new Date().toISOString();
+    await writeLocalState(state);
+    return true;
+  });
+}
+
+async function authorizePlayerJoin(playerId, matchId, playerSlot, token) {
+  if (
+    !Number.isInteger(playerSlot) ||
+    ![0, 1].includes(playerSlot) ||
+    typeof token !== 'string' ||
+    token.length === 0
+  ) {
+    return false;
+  }
+  const tokenHash = hashToken(token);
+  let storedHash = null;
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `SELECT join_token_hash FROM ${PARTICIPANT_TABLE}
+       WHERE match_id = $1 AND player_id = $2 AND player_slot = $3`,
+      [matchId, playerId, playerSlot],
+    );
+    storedHash = result.rowCount === 0 ? null : result.rows[0].join_token_hash;
+  } else {
+    const state = await readLocalState();
+    storedHash = state.participants.find(
+      (item) =>
+        item.matchId === matchId &&
+        item.playerId === playerId &&
+        item.playerSlot === playerSlot,
+    )?.joinTokenHash;
+  }
+  return safeHashEquals(storedHash, tokenHash);
+}
+
+async function completeAuthoritativeMatch(matchId, scores) {
+  return withSerializedMatchmaking(`result:${matchId}`, async () => {
+    const match = await getMatch(matchId);
+    if (match === null || match.players.length !== 2) {
+      return null;
+    }
+    const normalizedScores = normalizeAuthoritativeScores(scores);
+    const now = new Date().toISOString();
+    if (hasPersistentConfig()) {
+      for (const entry of normalizedScores) {
+        const participant = match.players.find((item) => item.slot === entry.playerSlot);
+        await getPgPool().query(
+          `INSERT INTO ${SCORE_TABLE}
+             (match_id, event_id, player_id, score, validation_status,
+              created_at, updated_at)
+           VALUES ($1, $2, $3, $4, 'accepted', $5, $5)
+           ON CONFLICT (match_id, player_id) DO UPDATE SET
+             score = EXCLUDED.score,
+             validation_status = 'accepted',
+             updated_at = EXCLUDED.updated_at`,
+          [matchId, match.eventId, participant.playerId, entry.score, now],
+        );
+      }
+      await getPgPool().query(
+        `UPDATE ${MATCH_TABLE}
+         SET status = 'completed', completed_at = COALESCE(completed_at, $2),
+             updated_at = $2
+         WHERE id = $1`,
+        [matchId, now],
+      );
+    } else {
+      const state = await readLocalState();
+      for (const entry of normalizedScores) {
+        const participant = state.participants.find(
+          (item) => item.matchId === matchId && item.playerSlot === entry.playerSlot,
+        );
+        const existing = state.scores.find(
+          (item) => item.matchId === matchId && item.playerId === participant.playerId,
+        );
+        const score = {
+          matchId,
+          eventId: match.eventId,
+          playerId: participant.playerId,
+          displayName: participant.displayName || 'Player',
+          provider: participant.provider,
+          score: entry.score,
+          validationStatus: 'accepted',
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+        };
+        if (existing === undefined) {
+          state.scores.push(score);
+        } else {
+          Object.assign(existing, score);
+        }
+      }
+      const localMatch = state.matches.find((item) => item.id === matchId);
+      localMatch.status = 'completed';
+      localMatch.completedAt = localMatch.completedAt || now;
+      localMatch.updatedAt = now;
+      await writeLocalState(state);
+    }
+    return getMatch(matchId);
+  });
 }
 
 async function submitScore(player, matchId, score) {
@@ -830,6 +999,35 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function safeHashEquals(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') {
+    return false;
+  }
+  const leftBuffer = Buffer.from(left, 'utf8');
+  const rightBuffer = Buffer.from(right, 'utf8');
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    crypto.timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
+function normalizeAuthoritativeScores(scores) {
+  if (!Array.isArray(scores) || scores.length !== 2) {
+    throw createStoreError('INVALID_RESULT', 'Two player scores are required');
+  }
+  const normalized = scores.map((entry) => ({
+    playerSlot: Number(entry?.playerSlot),
+    score: clampInteger(entry?.score, 0, MAX_SCORE),
+  }));
+  if (
+    normalized.some((entry) => ![0, 1].includes(entry.playerSlot)) ||
+    new Set(normalized.map((entry) => entry.playerSlot)).size !== 2
+  ) {
+    throw createStoreError('INVALID_RESULT', 'Scores must contain player slots 0 and 1');
+  }
+  return normalized;
+}
+
 function clampInteger(value, min, max) {
   const parsed = Math.floor(Number(value));
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : min;
@@ -842,14 +1040,18 @@ function createStoreError(code, message) {
 }
 
 module.exports = {
+  authorizePlayerJoin,
   approveEventPrizes,
+  completeAuthoritativeMatch,
   enterEvent,
   exitMatch,
+  getBroadcasterState,
   getEventLeaderboard,
   getMatch,
   listOpenMatches,
   markStarted,
   reconnect,
+  setBroadcasterState,
   startDirectMatch,
   startEventMatch,
   submitScore,

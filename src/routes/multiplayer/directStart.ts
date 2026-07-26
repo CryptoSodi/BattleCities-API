@@ -6,8 +6,10 @@ import {
   createOptionsResponse,
   resolveSessionPlayer,
 } from '../_helpers';
+import { createPlayerRuntime } from './_runtime';
 
 const multiplayerStore = require('../../stores/multiplayerStore');
+const broadcasterService = require('../../services/broadcasterService');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -24,7 +26,26 @@ export async function POST(request: Request): Promise<Response> {
       player,
       DIRECT_MATCH_FUEL_COST,
     );
-    return createJsonResponse(request, { ok: true, assignment }, 201);
+    if (assignment.match.status === 'waiting') {
+      return createJsonResponse(request, { ok: true, assignment }, 201);
+    }
+    try {
+      await broadcasterService.ensureMatchStarted(assignment.match.id, 1);
+      return createJsonResponse(
+        request,
+        { ok: true, assignment, runtime: createPlayerRuntime(request, assignment) },
+        201,
+      );
+    } catch (error) {
+      if ((error as any)?.code?.startsWith('BROADCASTER_')) {
+        return createJsonResponse(
+          request,
+          { ok: false, assignment, error: (error as Error).message },
+          503,
+        );
+      }
+      throw error;
+    }
   } catch (error) {
     return storeErrorResponse(request, error);
   }

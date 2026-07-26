@@ -1,6 +1,10 @@
 declare const require: any;
 
-import { createJsonResponse, createOptionsResponse } from './_helpers';
+import {
+  createJsonResponse,
+  createOptionsResponse,
+  resolveSessionPlayer,
+} from './_helpers';
 import {
   isMatchId,
   WebRtcSignalPublishRequest,
@@ -9,6 +13,8 @@ import {
 } from '../../../shared/src';
 
 const signalStore = require('../stores/webrtcSignalStore');
+const multiplayerStore = require('../stores/multiplayerStore');
+const broadcasterService = require('../services/broadcasterService');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -22,6 +28,9 @@ export async function POST(
 ): Promise<Response> {
   if (!isValidRoute(matchId, playerIndex, kind)) {
     return createJsonResponse(request, { ok: false, error: 'Invalid signal route' }, 400);
+  }
+  if (!(await authorizeSignalRequest(request, matchId))) {
+    return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
   }
 
   let body: WebRtcSignalPublishRequest;
@@ -66,6 +75,9 @@ export async function GET(
   if (!isValidRoute(matchId, playerIndex, kind)) {
     return createJsonResponse(request, { ok: false, error: 'Invalid signal route' }, 400);
   }
+  if (!(await authorizeSignalRequest(request, matchId))) {
+    return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
+  }
 
   const url = new URL(request.url);
   const signal = await signalStore.readSignal(
@@ -84,5 +96,39 @@ function isValidRoute(matchId: string, playerIndex: string, kind: string): boole
     isMatchId(matchId) &&
     signalStore.isValidPlayerIndex(playerIndex) &&
     signalStore.isValidSignalKind(kind)
+  );
+}
+
+async function authorizeSignalRequest(
+  request: Request,
+  signalingMatchId: string,
+): Promise<boolean> {
+  if (broadcasterService.isAuthorizedRequest(request)) {
+    return true;
+  }
+
+  const observerRoute = signalingMatchId.match(/^(match-[0-9a-z-]+)-o-([0-9a-z]{8})$/i);
+  if (observerRoute !== null) {
+    const observers = await signalStore.listObservers(observerRoute[1]);
+    return observers.includes(observerRoute[2].toLowerCase());
+  }
+
+  const playerRoute = signalingMatchId.match(/^(match-[0-9a-z-]+)-p([12])$/i);
+  if (playerRoute === null) {
+    return false;
+  }
+  const player = await resolveSessionPlayer(request);
+  if (player === null) {
+    return false;
+  }
+  const authorization = String(request.headers.get('authorization') || '');
+  const joinToken = authorization.startsWith('Bearer ')
+    ? authorization.slice(7).trim()
+    : '';
+  return multiplayerStore.authorizePlayerJoin(
+    player.id,
+    playerRoute[1],
+    Number(playerRoute[2]) - 1,
+    joinToken,
   );
 }

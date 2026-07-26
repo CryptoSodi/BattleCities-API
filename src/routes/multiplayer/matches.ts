@@ -6,10 +6,12 @@ import {
   createOptionsResponse,
   resolveSessionPlayer,
 } from '../_helpers';
+import { createPlayerRuntime } from './_runtime';
 
 const multiplayerStore = require('../../stores/multiplayerStore');
 const nodeCrypto = require('crypto');
 const signalStore = require('../../stores/webrtcSignalStore');
+const broadcasterService = require('../../services/broadcasterService');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -44,6 +46,9 @@ export async function POST(
   if (action === 'observe') {
     return observe(request, matchId);
   }
+  if (action === 'result') {
+    return submitAuthoritativeResult(request, matchId);
+  }
 
   const player = await resolveSessionPlayer(request);
   if (player === null) {
@@ -56,9 +61,29 @@ export async function POST(
   }
   if (action === 'reconnect') {
     const assignment = await multiplayerStore.reconnect(player, matchId);
-    return assignment === null
-      ? createJsonResponse(request, { ok: false, error: 'Active match not found' }, 404)
-      : createJsonResponse(request, { ok: true, assignment });
+    if (assignment === null) {
+      return createJsonResponse(request, { ok: false, error: 'Active match not found' }, 404);
+    }
+    if (assignment.match.status === 'waiting') {
+      return createJsonResponse(request, { ok: true, assignment });
+    }
+    try {
+      await broadcasterService.ensureMatchStarted(matchId, 1);
+      return createJsonResponse(request, {
+        ok: true,
+        assignment,
+        runtime: createPlayerRuntime(request, assignment),
+      });
+    } catch (error) {
+      if ((error as any)?.code?.startsWith('BROADCASTER_')) {
+        return createJsonResponse(
+          request,
+          { ok: false, assignment, error: (error as Error).message },
+          503,
+        );
+      }
+      throw error;
+    }
   }
   if (action === 'started') {
     const match = await multiplayerStore.markStarted(player, matchId);
@@ -67,30 +92,48 @@ export async function POST(
       : createJsonResponse(request, { ok: true, match });
   }
   if (action === 'score') {
-    let body: any;
-    try {
-      body = await request.json();
-    } catch {
-      return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
-    }
-    try {
-      const result = await multiplayerStore.submitScore(player, matchId, body?.score);
-      return result === null
-        ? createJsonResponse(request, { ok: false, error: 'Match membership not found' }, 404)
-        : createJsonResponse(request, { ok: true, result });
-    } catch (error) {
-      if ((error as any)?.code === 'MATCH_NOT_STARTED') {
-        return createJsonResponse(
-          request,
-          { ok: false, error: (error as Error).message },
-          409,
-        );
-      }
-      throw error;
-    }
+    return createJsonResponse(
+      request,
+      { ok: false, error: 'Only the broadcaster may submit match results' },
+      403,
+    );
   }
-
   return createJsonResponse(request, { ok: false, error: 'Unknown match action' }, 404);
+}
+
+async function submitAuthoritativeResult(
+  request: Request,
+  matchId: string,
+): Promise<Response> {
+  if (!broadcasterService.isAuthorizedRequest(request)) {
+    return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
+  }
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
+  }
+  try {
+    const match = await multiplayerStore.completeAuthoritativeMatch(
+      matchId,
+      body?.scores,
+    );
+    if (match === null) {
+      return createJsonResponse(request, { ok: false, error: 'Match not found' }, 404);
+    }
+    await broadcasterService.stopMatch(matchId);
+    return createJsonResponse(request, { ok: true, match });
+  } catch (error) {
+    if ((error as any)?.code === 'INVALID_RESULT') {
+      return createJsonResponse(
+        request,
+        { ok: false, error: (error as Error).message },
+        400,
+      );
+    }
+    throw error;
+  }
 }
 
 async function observe(request: Request, matchId: string): Promise<Response> {
@@ -107,7 +150,7 @@ async function observe(request: Request, matchId: string): Promise<Response> {
   }
   const observerId = signalStore.isValidObserverId(body?.observerId)
     ? body.observerId
-    : `obs-${cryptoRandomId()}`;
+    : cryptoRandomId();
   await signalStore.registerObserver(matchId, observerId);
   return createJsonResponse(
     request,
@@ -117,5 +160,5 @@ async function observe(request: Request, matchId: string): Promise<Response> {
 }
 
 function cryptoRandomId(): string {
-  return nodeCrypto.randomBytes(12).toString('hex');
+  return nodeCrypto.randomBytes(4).toString('hex');
 }
