@@ -39,8 +39,9 @@ Create a separate Vercel project from this repository with these settings:
 - Framework Preset: `Other`
 - Build and Output settings: leave the project defaults unchanged; the
   package's `vercel.json` runs production database migrations and deploys
-  `api/router.ts` as a Vercel Function. Preview builds skip migrations so they
-  cannot change the production schema.
+  `api/router.ts` as a Vercel Function. It explicitly clears any inherited
+  static output directory. Preview builds skip migrations so they cannot change
+  the production schema.
 
 Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `GOOGLE_OAUTH_STATE_SECRET`, and `BATTLECITY_WEB_BASE_URL` in the API project.

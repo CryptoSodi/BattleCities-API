@@ -92,4 +92,5 @@ test('Vercel runs migrations only for production deployments', async () => {
     'node scripts/migrate-deploy.mjs',
   );
   assert.equal(vercelConfig.buildCommand, 'npm run deploy:migrate');
+  assert.equal(vercelConfig.outputDirectory, null);
 });
