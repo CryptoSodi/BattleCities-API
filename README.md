@@ -31,6 +31,33 @@ npm run api:build
 npm --prefix api-server run smoke:local
 ```
 
+## Vercel deployment
+
+Create a separate Vercel project from this repository with these settings:
+
+- Root Directory: `api-server`
+- Framework Preset: `Other`
+- Build and Output settings: leave the project defaults unchanged; the
+  package's `vercel.json` disables the static build and deploys `api/router.ts`
+  as a Vercel Function.
+
+Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+`GOOGLE_OAUTH_STATE_SECRET`, and `BATTLECITY_WEB_BASE_URL` in the API project.
+Set `BATTLECITY_WEB_BASE_URL=https://www.battlecities.com`. Production replay
+storage also requires `BLOB_READ_WRITE_TOKEN`. A small per-instance pool such
+as `BATTLECITY_DATABASE_POOL_SIZE=2` is recommended for Vercel because the Neon
+URL is already pooled.
+
+After deployment, assign `api.battlecities.com` to the API project and verify:
+
+```text
+https://api.battlecities.com/api/health
+https://api.battlecities.com/api/ready
+```
+
+The frontend Vercel project must set
+`BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
+
 Database migrations, readiness checks, and the schema/fallback inventory are
 documented in [`docs/database.md`](docs/database.md).
 

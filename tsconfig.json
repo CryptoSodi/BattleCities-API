@@ -16,6 +16,7 @@
     }
   },
   "include": [
+    "api/**/*.ts",
     "src/**/*.ts",
     "src/**/*.js",
     "../shared/src/**/*.ts"

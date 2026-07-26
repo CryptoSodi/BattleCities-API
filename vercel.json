@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": null,
+  "fluid": true,
+  "regions": ["iad1"],
+  "functions": {
+    "api/router.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/((?!router$).*)",
+      "destination": "/api/router?__route=$1"
+    }
+  ]
+}
