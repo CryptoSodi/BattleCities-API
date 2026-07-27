@@ -93,6 +93,27 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
   await context.economy.creditFuel(two, 1, { sourceId: 'broadcaster-two' });
   const first = await context.multiplayer.startDirectMatch(one, 1);
   await context.multiplayer.startDirectMatch(two, 1);
+  await context.economy.purchaseItemForPlayer(one, 'shield', 'token');
+  await context.economy.purchaseItemForPlayer(one, 'shield', 'token');
+  await context.economy.purchaseItemForPlayer(one, 'speed', 'token');
+  await context.economy.purchaseItemForPlayer(two, 'freeze', 'token');
+  await context.economy.purchaseItemForPlayer(two, 'extra-life', 'token');
+  const playerOneAccount = await context.economy.readAccount(one.id);
+  const playerTwoAccount = await context.economy.readAccount(two.id);
+  await context.economy.upsertAccountForPlayer(one, {
+    inventory: playerOneAccount.inventory,
+    loadout: {
+      'active-one': 'shield',
+      'active-three': 'speed',
+    },
+  });
+  await context.economy.upsertAccountForPlayer(two, {
+    inventory: playerTwoAccount.inventory,
+    loadout: {
+      'active-two': 'freeze',
+      'active-four': 'extra-life',
+    },
+  });
 
   const previousFetch = globalThis.fetch;
   const previousBaseUrl = process.env.BROADCASTER_BASE_URL;
@@ -131,6 +152,16 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
     assert.deepEqual(JSON.parse(calls[0].init.body), {
       matchId: first.match.id,
       level: 1,
+      playerRunConsumables: [
+        {
+          powerups: ['shield', 'speed'],
+          powerupCounts: [2, 1],
+        },
+        {
+          powerups: ['freeze', 'life'],
+          powerupCounts: [1, 1],
+        },
+      ],
     });
     assert.equal(
       (await context.multiplayer.getBroadcasterState(first.match.id)).status,

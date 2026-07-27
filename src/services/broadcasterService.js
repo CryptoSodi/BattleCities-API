@@ -1,5 +1,24 @@
 const crypto = require('crypto');
+const economyStore = require('../stores/economyStore');
 const multiplayerStore = require('../stores/multiplayerStore');
+
+const ACTIVE_LOADOUT_SLOTS = [
+  'active-one',
+  'active-two',
+  'active-three',
+  'active-four',
+];
+const MAX_POWERUP_STACK = 2;
+const POWERUP_TYPES = {
+  shield: 'shield',
+  'base-defence': 'defence',
+  freeze: 'freeze',
+  speed: 'speed',
+  upgrade: 'upgrade',
+  'zoom-out': 'zoomout',
+  wipeout: 'wipeout',
+  'extra-life': 'life',
+};
 
 function getConfig() {
   const baseUrl = String(process.env.BROADCASTER_BASE_URL || '')
@@ -27,6 +46,7 @@ async function ensureMatchStarted(matchId, level) {
   }
 
   const config = getConfig();
+  const playerRunConsumables = await getPlayerRunConsumables(matchId);
   await multiplayerStore.setBroadcasterState(matchId, 'starting');
   let response;
   try {
@@ -36,7 +56,7 @@ async function ensureMatchStarted(matchId, level) {
         authorization: `Bearer ${config.token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ matchId, level }),
+      body: JSON.stringify({ matchId, level, playerRunConsumables }),
     });
   } catch (cause) {
     await multiplayerStore.setBroadcasterState(matchId, 'failed');
@@ -57,6 +77,52 @@ async function ensureMatchStarted(matchId, level) {
   );
   await multiplayerStore.setBroadcasterState(matchId, 'running', workerUrl);
   return multiplayerStore.getBroadcasterState(matchId);
+}
+
+async function getPlayerRunConsumables(matchId) {
+  const match = await multiplayerStore.getMatch(matchId);
+  const players = Array.isArray(match?.players) ? match.players : [];
+  const accountsBySlot = await Promise.all(
+    [0, 1].map(async (playerSlot) => {
+      const participant = players.find((player) => player.slot === playerSlot);
+      return participant === undefined
+        ? null
+        : economyStore.readAccount(participant.playerId);
+    }),
+  );
+  return accountsBySlot.map(toRunConsumables);
+}
+
+function toRunConsumables(account) {
+  const inventory =
+    account !== null && typeof account?.inventory === 'object'
+      ? account.inventory
+      : {};
+  const loadout =
+    account !== null && typeof account?.loadout === 'object'
+      ? account.loadout
+      : {};
+  const powerups = [];
+  const powerupCounts = [];
+  const equippedItems = new Set();
+
+  ACTIVE_LOADOUT_SLOTS.forEach((slot) => {
+    const itemId = loadout[slot];
+    const powerupType = POWERUP_TYPES[itemId];
+    const count = Math.max(0, Math.floor(Number(inventory[itemId]) || 0));
+    if (
+      powerupType === undefined ||
+      count === 0 ||
+      equippedItems.has(itemId)
+    ) {
+      return;
+    }
+    equippedItems.add(itemId);
+    powerups.push(powerupType);
+    powerupCounts.push(Math.min(MAX_POWERUP_STACK, count));
+  });
+
+  return { powerups, powerupCounts };
 }
 
 async function stopMatch(matchId) {
