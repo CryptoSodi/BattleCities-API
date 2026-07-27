@@ -61,6 +61,19 @@ https://api.battlecities.com/api/ready
 The frontend Vercel project must set
 `BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
 
+The multiplayer deployment-specific values are:
+
+```env
+# Vercel API project only
+BROADCASTER_BASE_URL=https://broadcaster.battlecities.com
+BROADCASTER_SERVICE_TOKEN=replace-with-a-strong-random-secret
+```
+
+The service token must exactly match the headless broadcaster token and must
+never be configured in the frontend Vercel project. The complete three-project
+setup is documented in
+[Deployment Environment Setup](../docs/environment-setup.md).
+
 Production migration builds use a PostgreSQL advisory lock, so overlapping
 deployments wait for one another instead of applying the same migration
 concurrently. Failed migrations stop the deployment before it is published.
