@@ -49,7 +49,7 @@ async function ensureMatchStarted(matchId, level) {
     }
   }
 
-  const playerRunConsumables = await getPlayerRunConsumables(matchId);
+  const runtimeOptions = await getMatchRuntimeOptions(matchId);
   await multiplayerStore.setBroadcasterState(matchId, 'starting');
   let response;
   try {
@@ -59,7 +59,7 @@ async function ensureMatchStarted(matchId, level) {
         authorization: `Bearer ${config.token}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ matchId, level, playerRunConsumables }),
+      body: JSON.stringify({ matchId, level, ...runtimeOptions }),
     });
   } catch (cause) {
     await multiplayerStore.setBroadcasterState(matchId, 'failed');
@@ -112,7 +112,7 @@ async function probeMatch(config, matchId) {
   return true;
 }
 
-async function getPlayerRunConsumables(matchId) {
+async function getMatchRuntimeOptions(matchId) {
   const match = await multiplayerStore.getMatch(matchId);
   const players = Array.isArray(match?.players) ? match.players : [];
   const accountsBySlot = await Promise.all(
@@ -123,7 +123,15 @@ async function getPlayerRunConsumables(matchId) {
         : economyStore.readAccount(participant.playerId);
     }),
   );
-  return accountsBySlot.map(toRunConsumables);
+  return {
+    category:
+      match?.category === 'event'
+        ? 'event'
+        : accountsBySlot.every((account) => account?.provider === 'guest')
+          ? 'guest'
+          : 'live',
+    playerRunConsumables: accountsBySlot.map(toRunConsumables),
+  };
 }
 
 function toRunConsumables(account) {
