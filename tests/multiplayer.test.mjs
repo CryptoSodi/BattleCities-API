@@ -119,13 +119,28 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
   const previousBaseUrl = process.env.BROADCASTER_BASE_URL;
   const previousToken = process.env.BROADCASTER_SERVICE_TOKEN;
   const calls = [];
+  let runtimeExists = false;
   process.env.BROADCASTER_BASE_URL = 'https://broadcaster.example.test';
   process.env.BROADCASTER_SERVICE_TOKEN = 'test-service-token';
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), init });
-    return init?.method === 'DELETE'
-      ? new Response(null, { status: 204 })
-      : new Response(JSON.stringify({ workerUrl: 'http://127.0.0.1:9010/' }), {
+    if (init?.method === 'DELETE') {
+      runtimeExists = false;
+      return new Response(null, { status: 204 });
+    }
+    if (init?.method === undefined) {
+      return runtimeExists
+        ? new Response(
+          JSON.stringify({ status: 'running', workerUrl: 'http://127.0.0.1:9010/' }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+        : new Response(JSON.stringify({ error: 'Match not found.' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        });
+    }
+    runtimeExists = true;
+    return new Response(JSON.stringify({ workerUrl: 'http://127.0.0.1:9010/' }), {
           status: 201,
           headers: { 'content-type': 'application/json' },
         });
@@ -147,7 +162,7 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
     );
     await broadcaster.ensureMatchStarted(first.match.id, 1);
     await broadcaster.ensureMatchStarted(first.match.id, 1);
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].init.headers.authorization, 'Bearer test-service-token');
     assert.deepEqual(JSON.parse(calls[0].init.body), {
       matchId: first.match.id,
@@ -163,6 +178,13 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
         },
       ],
     });
+    assert.equal(calls[1].init.method, undefined);
+
+    runtimeExists = false;
+    await broadcaster.ensureMatchStarted(first.match.id, 1);
+    assert.equal(calls.length, 4);
+    assert.equal(calls[2].init.method, undefined);
+    assert.equal(calls[3].init.method, 'POST');
     assert.equal(
       (await context.multiplayer.getBroadcasterState(first.match.id)).status,
       'running',
@@ -174,7 +196,7 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
     ]);
     await broadcaster.stopMatch(first.match.id);
     await broadcaster.stopMatch(first.match.id);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 5);
     assert.equal(
       (await context.multiplayer.getBroadcasterState(first.match.id)).status,
       'stopped',

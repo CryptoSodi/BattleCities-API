@@ -40,12 +40,15 @@ function isAuthorizedRequest(request) {
 }
 
 async function ensureMatchStarted(matchId, level) {
+  const config = getConfig();
   const existing = await multiplayerStore.getBroadcasterState(matchId);
   if (existing?.status === 'running') {
-    return existing;
+    const running = await probeMatch(config, matchId);
+    if (running) {
+      return existing;
+    }
   }
 
-  const config = getConfig();
   const playerRunConsumables = await getPlayerRunConsumables(matchId);
   await multiplayerStore.setBroadcasterState(matchId, 'starting');
   let response;
@@ -77,6 +80,36 @@ async function ensureMatchStarted(matchId, level) {
   );
   await multiplayerStore.setBroadcasterState(matchId, 'running', workerUrl);
   return multiplayerStore.getBroadcasterState(matchId);
+}
+
+async function probeMatch(config, matchId) {
+  let response;
+  try {
+    response = await fetch(
+      `${config.baseUrl}/matches/${encodeURIComponent(matchId)}`,
+      {
+        headers: { authorization: `Bearer ${config.token}` },
+      },
+    );
+  } catch (cause) {
+    await multiplayerStore.setBroadcasterState(matchId, 'failed');
+    throw createServiceError(
+      'BROADCASTER_START_FAILED',
+      'Broadcaster is unavailable',
+      cause,
+    );
+  }
+  if (response.status === 404) {
+    return false;
+  }
+  if (!response.ok) {
+    await multiplayerStore.setBroadcasterState(matchId, 'failed');
+    throw createServiceError(
+      'BROADCASTER_START_FAILED',
+      `Broadcaster status check failed (${response.status})`,
+    );
+  }
+  return true;
 }
 
 async function getPlayerRunConsumables(matchId) {
