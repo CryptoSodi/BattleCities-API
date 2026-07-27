@@ -12,6 +12,7 @@ const SCORE_TABLE = 'battlecity_multiplayer_scores';
 const APPROVAL_TABLE = 'battlecity_event_prize_approvals';
 const OPEN_STATUSES = ['waiting', 'ready', 'live'];
 const MAX_SCORE = 1000000;
+const WAITING_MATCH_ACTIVE_MS = 10000;
 
 let localQueue = Promise.resolve();
 
@@ -36,9 +37,18 @@ function getDataPath() {
 }
 
 async function startDirectMatch(player, fuelCost) {
-  return withSerializedMatchmaking('direct', async () =>
-    startMatch(player, 'direct', null, fuelCost, 0),
-  );
+  return withSerializedMatchmaking('direct', async () => {
+    const abandonedMatchIds = await abandonOpenDirectMatches(player);
+    const assignment = await startMatch(
+      player,
+      'direct',
+      null,
+      fuelCost,
+      0,
+      false,
+    );
+    return { ...assignment, abandonedMatchIds };
+  });
 }
 
 async function enterEvent(player, event, fuelCost) {
@@ -58,10 +68,19 @@ async function startEventMatch(player, event, fuelCost) {
   );
 }
 
-async function startMatch(player, category, eventId, directFuelCost, eventFuelCost) {
-  const existing = await findOpenAssignment(player.id, category, eventId);
-  if (existing !== null) {
-    return rotateAssignmentToken(existing, true, false, 0);
+async function startMatch(
+  player,
+  category,
+  eventId,
+  directFuelCost,
+  eventFuelCost,
+  reconnectExisting = true,
+) {
+  if (reconnectExisting) {
+    const existing = await findOpenAssignment(player.id, category, eventId);
+    if (existing !== null) {
+      return rotateAssignmentToken(existing, true, false, 0);
+    }
   }
 
   let eventEntryCreated = false;
@@ -165,6 +184,122 @@ async function startMatch(player, category, eventId, directFuelCost, eventFuelCo
     eventEntryCreated,
     reconnected: false,
   };
+}
+
+async function abandonOpenDirectMatches(player) {
+  const now = new Date().toISOString();
+  const refunds = [];
+  let abandonedMatchIds = [];
+
+  if (hasPersistentConfig()) {
+    const result = await getPgPool().query(
+      `
+        SELECT m.id, m.status, p.fuel_charged, p.fuel_refunded
+        FROM ${MATCH_TABLE} m
+        JOIN ${PARTICIPANT_TABLE} p ON p.match_id = m.id
+        WHERE p.player_id = $1
+          AND m.category = 'direct'
+          AND m.status = ANY($2::text[])
+        FOR UPDATE OF m
+      `,
+      [player.id, OPEN_STATUSES],
+    );
+    abandonedMatchIds = result.rows.map((row) => row.id);
+    if (abandonedMatchIds.length === 0) {
+      return [];
+    }
+    result.rows.forEach((row) => {
+      const amount = row.status === 'waiting'
+        ? Math.max(0, Number(row.fuel_charged) - Number(row.fuel_refunded))
+        : 0;
+      if (amount > 0) {
+        refunds.push({ matchId: row.id, amount });
+      }
+    });
+    await getPgPool().query(
+      `
+        UPDATE ${MATCH_TABLE}
+        SET status = 'closed', closed_at = $2, updated_at = $2
+        WHERE id = ANY($1::text[])
+      `,
+      [abandonedMatchIds, now],
+    );
+    await getPgPool().query(
+      `
+        UPDATE ${PARTICIPANT_TABLE}
+        SET left_at = COALESCE(left_at, $2)
+        WHERE match_id = ANY($1::text[])
+      `,
+      [abandonedMatchIds, now],
+    );
+    const waitingMatchIds = refunds.map((refund) => refund.matchId);
+    if (waitingMatchIds.length > 0) {
+      await getPgPool().query(
+        `
+          UPDATE ${PARTICIPANT_TABLE}
+          SET fuel_refunded = fuel_charged
+          WHERE player_id = $1 AND match_id = ANY($2::text[])
+        `,
+        [player.id, waitingMatchIds],
+      );
+    }
+  } else {
+    const state = await readLocalState();
+    abandonedMatchIds = state.matches
+      .filter((match) => {
+        return (
+          match.category === 'direct' &&
+          OPEN_STATUSES.includes(match.status) &&
+          state.participants.some(
+            (participant) =>
+              participant.matchId === match.id &&
+              participant.playerId === player.id,
+          )
+        );
+      })
+      .map((match) => match.id);
+    if (abandonedMatchIds.length === 0) {
+      return [];
+    }
+    state.matches
+      .filter((match) => abandonedMatchIds.includes(match.id))
+      .forEach((match) => {
+        const participant = state.participants.find(
+          (item) =>
+            item.matchId === match.id && item.playerId === player.id,
+        );
+        const amount = match.status === 'waiting'
+          ? Math.max(
+            0,
+            participant.fuelCharged - participant.fuelRefunded,
+          )
+          : 0;
+        if (amount > 0) {
+          participant.fuelRefunded += amount;
+          refunds.push({ matchId: match.id, amount });
+        }
+        match.status = 'closed';
+        match.closedAt = now;
+        match.updatedAt = now;
+      });
+    state.participants
+      .filter((participant) =>
+        abandonedMatchIds.includes(participant.matchId),
+      )
+      .forEach((participant) => {
+        participant.leftAt = participant.leftAt || now;
+      });
+    await writeLocalState(state);
+  }
+
+  for (const refund of refunds) {
+    await economyStore.creditFuel(player, refund.amount, {
+      reason: 'multiplayer-refund',
+      sourceType: 'multiplayer-match',
+      sourceId: refund.matchId,
+    });
+  }
+  return abandonedMatchIds;
 }
 
 async function ensureEventEntry(player, eventId, fuelCost) {
@@ -282,8 +417,32 @@ async function reconnect(player, matchId) {
     if (assignment === null || !OPEN_STATUSES.includes(assignment.match.status)) {
       return null;
     }
+    if (assignment.match.status === 'waiting') {
+      await touchWaitingMatch(matchId);
+    }
     return rotateAssignmentToken(assignment, true, false, 0);
   });
+}
+
+async function touchWaitingMatch(matchId) {
+  const now = new Date().toISOString();
+  if (hasPersistentConfig()) {
+    await getPgPool().query(
+      `
+        UPDATE ${MATCH_TABLE}
+        SET updated_at = $2
+        WHERE id = $1 AND status = 'waiting'
+      `,
+      [matchId, now],
+    );
+    return;
+  }
+  const state = await readLocalState();
+  const match = state.matches.find((item) => item.id === matchId);
+  if (match?.status === 'waiting') {
+    match.updatedAt = now;
+    await writeLocalState(state);
+  }
 }
 
 async function markStarted(player, matchId) {
@@ -822,6 +981,9 @@ async function rotateAssignmentToken(
 }
 
 async function findWaitingMatch(category, eventId, excludedPlayerId) {
+  const activeAfter = new Date(
+    Date.now() - WAITING_MATCH_ACTIVE_MS,
+  ).toISOString();
   if (hasPersistentConfig()) {
     await ensureSchema();
     const result = await getPgPool().query(
@@ -831,6 +993,10 @@ async function findWaitingMatch(category, eventId, excludedPlayerId) {
         WHERE m.category = $1
           AND m.event_id IS NOT DISTINCT FROM $2
           AND m.status = 'waiting'
+          AND (
+            m.category <> 'direct' OR
+            m.updated_at >= $4
+          )
           AND NOT EXISTS (
             SELECT 1 FROM ${PARTICIPANT_TABLE} p
             WHERE p.match_id = m.id AND p.player_id = $3
@@ -839,17 +1005,22 @@ async function findWaitingMatch(category, eventId, excludedPlayerId) {
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       `,
-      [category, eventId, excludedPlayerId],
+      [category, eventId, excludedPlayerId, activeAfter],
     );
     return result.rowCount === 0 ? null : { id: result.rows[0].id };
   }
   const state = await readLocalState();
+  const activeAfterTimestamp = Date.parse(activeAfter);
   return (
     state.matches.find(
       (match) =>
         match.category === category &&
         match.eventId === eventId &&
         match.status === 'waiting' &&
+        (
+          match.category !== 'direct' ||
+          Date.parse(match.updatedAt) >= activeAfterTimestamp
+        ) &&
         !state.participants.some(
           (item) => item.matchId === match.id && item.playerId === excludedPlayerId,
         ),

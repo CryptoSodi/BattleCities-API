@@ -22,9 +22,22 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const assignment = await multiplayerStore.startDirectMatch(
+    const result = await multiplayerStore.startDirectMatch(
       player,
       DIRECT_MATCH_FUEL_COST,
+    );
+    const abandonedMatchIds = Array.isArray(result.abandonedMatchIds)
+      ? result.abandonedMatchIds
+      : [];
+    const { abandonedMatchIds: _ignored, ...assignment } = result;
+    await Promise.all(
+      abandonedMatchIds.map(async (matchId: string) => {
+        try {
+          await broadcasterService.stopMatch(matchId);
+        } catch {
+          // Matchmaking must continue even if an old runtime is already gone.
+        }
+      }),
     );
     if (assignment.match.status === 'waiting') {
       return createJsonResponse(request, { ok: true, assignment }, 201);

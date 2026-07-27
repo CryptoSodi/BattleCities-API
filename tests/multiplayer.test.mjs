@@ -86,6 +86,37 @@ test('direct matchmaking charges fuel, fills two slots, and refunds waiting exit
   assert.equal((await context.economy.readAccount(three.id)).fuelBalance, 3);
 });
 
+test('fresh direct matchmaking skips stale assignments and pairs active players', async () => {
+  const context = await createContext();
+  const [one, two] = context.players;
+  await context.economy.creditFuel(one, 3, { sourceId: 'fresh-one' });
+  await context.economy.creditFuel(two, 3, { sourceId: 'fresh-two' });
+
+  const stale = await context.multiplayer.startDirectMatch(one, 1);
+  const statePath = path.join(
+    process.env.BATTLECITY_MULTIPLAYER_DIR,
+    'state.json',
+  );
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  state.matches.find((match) => match.id === stale.match.id).updatedAt =
+    new Date(Date.now() - 60000).toISOString();
+  await fs.writeFile(statePath, JSON.stringify(state), 'utf8');
+
+  const active = await context.multiplayer.startDirectMatch(two, 1);
+  assert.notEqual(active.match.id, stale.match.id);
+  assert.equal(active.match.status, 'waiting');
+
+  const paired = await context.multiplayer.startDirectMatch(one, 1);
+  assert.equal(paired.match.id, active.match.id);
+  assert.equal(paired.playerSlot, 1);
+  assert.equal(paired.match.status, 'ready');
+  assert.deepEqual(paired.abandonedMatchIds, [stale.match.id]);
+  assert.equal(
+    (await context.multiplayer.getMatch(stale.match.id)).status,
+    'closed',
+  );
+});
+
 test('broadcaster startup and shutdown are idempotent and persist lifecycle state', async () => {
   const context = await createContext();
   const [one, two] = context.players;
