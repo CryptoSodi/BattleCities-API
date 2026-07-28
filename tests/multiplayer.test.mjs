@@ -198,7 +198,20 @@ test('broadcaster startup and shutdown are idempotent and persist lifecycle stat
     assert.deepEqual(JSON.parse(calls[0].init.body), {
       matchId: first.match.id,
       level: 1,
+      gameType: 'direct',
       category: 'live',
+      players: [
+        {
+          playerId: one.id,
+          displayName: one.displayName,
+          slot: 0,
+        },
+        {
+          playerId: two.id,
+          displayName: two.displayName,
+          slot: 1,
+        },
+      ],
       playerRunConsumables: [
         {
           powerups: ['shield', 'speed'],

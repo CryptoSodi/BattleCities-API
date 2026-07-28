@@ -79,6 +79,23 @@ test('broadcaster migration persists the worker lifecycle without exposing secre
   assert.doesNotMatch(sql, /service_token/i);
 });
 
+test('match archive migration persists metadata and ordered frame batches', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/005_match_archives.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_match_archives\b/);
+  assert.match(
+    sql,
+    /CREATE TABLE IF NOT EXISTS battlecity_match_archive_batches\b/,
+  );
+  assert.match(sql, /simulation_config_json JSONB NOT NULL/);
+  assert.match(sql, /players_json JSONB NOT NULL/);
+  assert.match(sql, /frames_json JSONB NOT NULL/);
+  assert.match(sql, /PRIMARY KEY \(match_id, start_seq\)/);
+  assert.match(sql, /jsonb_array_length\(frames_json\) = frame_count/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

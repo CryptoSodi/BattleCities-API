@@ -13,6 +13,7 @@ import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
+import * as multiplayerArchives from '../routes/multiplayer/archives';
 import * as multiplayerEvents from '../routes/multiplayer/events';
 import * as multiplayerMatches from '../routes/multiplayer/matches';
 import * as phases from '../routes/phases';
@@ -84,6 +85,8 @@ const multiplayerMatchRoutePattern =
   /^multiplayer\/matches\/([^/]+)$/;
 const multiplayerMatchActionRoutePattern =
   /^multiplayer\/matches\/([^/]+)\/([^/]+)$/;
+const multiplayerArchiveRoutePattern =
+  /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
 const multiplayerEventRoutePattern =
   /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
 
@@ -100,6 +103,21 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  const multiplayerArchiveMatch = route.match(multiplayerArchiveRoutePattern);
+  if (multiplayerArchiveMatch !== null) {
+    const [, matchId = null, action = null] = multiplayerArchiveMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return multiplayerArchives.GET(request, matchId, action);
+    }
+    if (method === 'POST' && matchId !== null && action !== null) {
+      return multiplayerArchives.POST(request, matchId, action);
+    }
+    if (method === 'OPTIONS') {
+      return multiplayerArchives.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, POST, OPTIONS');
+  }
   if (route === 'multiplayer/matches/live') {
     if (request.method.toUpperCase() === 'GET') {
       return multiplayerMatches.GET(request);

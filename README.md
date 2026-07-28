@@ -123,6 +123,13 @@ POST /api/multiplayer/matches/:matchId/exit
 POST /api/multiplayer/matches/:matchId/observe
 POST /api/multiplayer/matches/:matchId/result  (broadcaster only)
 
+GET  /api/multiplayer/archives                    (broadcaster only)
+GET  /api/multiplayer/archives/:matchId           (broadcaster only)
+GET  /api/multiplayer/archives/:matchId/frames    (broadcaster only)
+POST /api/multiplayer/archives/:matchId/start     (broadcaster only)
+POST /api/multiplayer/archives/:matchId/frames    (broadcaster only)
+POST /api/multiplayer/archives/:matchId/complete  (broadcaster only)
+
 POST /api/events/:eventId/enter
 POST /api/events/:eventId/start
 GET  /api/events/:eventId/leaderboard
@@ -135,6 +142,19 @@ player-authenticated score submissions are rejected. Event leaderboards retain
 each real player's best accepted score and give tied scores the same rank. Prize
 approval records an explicit administrator-supplied allocation and does not
 transfer funds automatically.
+
+The headless broadcaster records every authoritative host frame in contiguous,
+idempotent PostgreSQL batches. Archive metadata includes both players, game
+type, level, seed, simulation configuration, final result, and score details.
+Apply migration `005_match_archives` before running the updated broadcaster:
+
+```powershell
+npm --prefix api-server run db:migrate
+```
+
+Local storage mode writes archive metadata and JSONL frame batches under
+`server-data/match-archives`. Override that path with
+`BATTLECITY_MATCH_ARCHIVE_DIR` for isolated local tests.
 
 Do not add new HTTP behavior to the root route copies. New API work belongs in
 `api-server/src/routes`, with supporting code in `config`, `middleware`,

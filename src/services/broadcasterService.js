@@ -124,12 +124,18 @@ async function getMatchRuntimeOptions(matchId) {
     }),
   );
   return {
+    gameType: match?.category || 'direct',
     category:
       match?.category === 'event'
         ? 'event'
         : accountsBySlot.every((account) => account?.provider === 'guest')
           ? 'guest'
           : 'live',
+    players: players.map((player) => ({
+      playerId: player.playerId,
+      displayName: player.displayName || 'Player',
+      slot: player.slot,
+    })),
     playerRunConsumables: accountsBySlot.map(toRunConsumables),
   };
 }
