@@ -265,23 +265,29 @@ async function completeArchive(matchId, input) {
 
 async function listArchives(options = {}) {
   const limit = clampInteger(options.limit, 1, MAX_LIST_LIMIT, 50);
+  const includeIncomplete = options.includeIncomplete === true;
   if (hasPersistentConfig()) {
     await ensureSchema();
     const result = await getPgPool().query(
       `SELECT * FROM ${ARCHIVE_TABLE}
        WHERE status = 'completed'
-       ORDER BY completed_at DESC NULLS LAST, started_at DESC
+          OR ($2::boolean AND frame_count > 0)
+       ORDER BY COALESCE(completed_at, updated_at) DESC, started_at DESC
        LIMIT $1`,
-      [limit],
+      [limit, includeIncomplete],
     );
     return result.rows.map(toPublicDatabaseArchive);
   }
   const state = await readLocalState();
   return state.archives
-    .filter((archive) => archive.status === 'completed')
+    .filter(
+      (archive) =>
+        archive.status === 'completed' ||
+        (includeIncomplete && archive.frameCount > 0),
+    )
     .sort((left, right) =>
-      String(right.completedAt || right.startedAt).localeCompare(
-        String(left.completedAt || left.startedAt),
+      String(right.completedAt || right.updatedAt || right.startedAt).localeCompare(
+        String(left.completedAt || left.updatedAt || left.startedAt),
       ),
     )
     .slice(0, limit)

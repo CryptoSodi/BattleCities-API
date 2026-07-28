@@ -39,6 +39,11 @@ test('match archives preserve metadata and every authoritative frame', async () 
     await store.appendFrames(matchId, firstBatch);
     await store.appendFrames(matchId, firstBatch);
     await store.appendFrames(matchId, [frame(3), frame(4)]);
+    assert.equal((await store.listArchives()).length, 0);
+    assert.equal(
+      (await store.listArchives({ includeIncomplete: true })).length,
+      1,
+    );
     await assert.rejects(
       () => store.appendFrames(matchId, [frame(6)]),
       (error) => error.code === 'ARCHIVE_SEQUENCE_CONFLICT',

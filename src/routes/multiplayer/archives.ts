@@ -24,6 +24,7 @@ export async function GET(
     return createJsonResponse(request, {
       items: await archiveStore.listArchives({
         limit: url.searchParams.get('limit'),
+        includeIncomplete: url.searchParams.get('includeIncomplete') === '1',
       }),
     });
   }
