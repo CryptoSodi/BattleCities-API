@@ -135,7 +135,12 @@ async function getMatchRuntimeOptions(matchId) {
       playerId: player.playerId,
       displayName: player.displayName || 'Player',
       slot: player.slot,
+      tankTier: player.tankTier || 'a',
     })),
+    initialPlayerTiers: [0, 1].map((playerSlot) => {
+      const player = players.find((candidate) => candidate.slot === playerSlot);
+      return player?.tankTier || 'a';
+    }),
     playerRunConsumables: accountsBySlot.map(toRunConsumables),
   };
 }

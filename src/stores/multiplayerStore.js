@@ -36,7 +36,7 @@ function getDataPath() {
   );
 }
 
-async function startDirectMatch(player, fuelCost) {
+async function startDirectMatch(player, fuelCost, tankTier = 'a') {
   return withSerializedMatchmaking('direct', async () => {
     const abandonedMatchIds = await abandonOpenDirectMatches(player);
     const assignment = await startMatch(
@@ -46,6 +46,7 @@ async function startDirectMatch(player, fuelCost) {
       fuelCost,
       0,
       false,
+      tankTier,
     );
     return { ...assignment, abandonedMatchIds };
   });
@@ -75,6 +76,7 @@ async function startMatch(
   directFuelCost,
   eventFuelCost,
   reconnectExisting = true,
+  tankTier = 'a',
 ) {
   if (reconnectExisting) {
     const existing = await findOpenAssignment(player.id, category, eventId);
@@ -123,10 +125,18 @@ async function startMatch(
       `
         INSERT INTO ${PARTICIPANT_TABLE}
           (match_id, player_id, player_slot, join_token_hash,
-           fuel_charged, fuel_refunded, joined_at)
-        VALUES ($1, $2, $3, $4, $5, 0, $6)
+           fuel_charged, fuel_refunded, joined_at, tank_tier)
+        VALUES ($1, $2, $3, $4, $5, 0, $6, $7)
       `,
-      [matchId, player.id, playerSlot, hashToken(token), chargedFuel, now],
+      [
+        matchId,
+        player.id,
+        playerSlot,
+        hashToken(token),
+        chargedFuel,
+        now,
+        normalizeTankTier(tankTier),
+      ],
     );
     if (playerSlot === 1) {
       await getPgPool().query(
@@ -166,6 +176,7 @@ async function startMatch(
       fuelRefunded: 0,
       joinedAt: now,
       leftAt: null,
+      tankTier: normalizeTankTier(tankTier),
     });
     if (playerSlot === 1) {
       const match = state.matches.find((item) => item.id === matchId);
@@ -854,6 +865,7 @@ async function getMatch(matchId) {
       `
         SELECT m.id, m.category, m.event_id, m.status, m.created_at,
           m.started_at, m.completed_at, p.player_id, p.player_slot,
+          p.tank_tier,
           players.display_name
         FROM ${MATCH_TABLE} m
         LEFT JOIN ${PARTICIPANT_TABLE} p ON p.match_id = m.id
@@ -1109,6 +1121,7 @@ function toPublicDatabaseMatch(rows) {
         playerId: row.player_id,
         displayName: row.display_name || 'Player',
         slot: Number(row.player_slot),
+        tankTier: normalizeTankTier(row.tank_tier),
       })),
     createdAt: new Date(first.created_at).toISOString(),
     startedAt: first.started_at ? new Date(first.started_at).toISOString() : null,
@@ -1131,6 +1144,7 @@ function toPublicLocalMatch(state, match) {
         playerId: participant.playerId,
         displayName: participant.displayName,
         slot: participant.playerSlot,
+        tankTier: normalizeTankTier(participant.tankTier),
       })),
     createdAt: match.createdAt,
     startedAt: match.startedAt,
@@ -1213,6 +1227,10 @@ function normalizeAuthoritativeScores(scores) {
 function clampInteger(value, min, max) {
   const parsed = Math.floor(Number(value));
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : min;
+}
+
+function normalizeTankTier(value) {
+  return ['a', 'b', 'c', 'd'].includes(value) ? value : 'a';
 }
 
 function createStoreError(code, message) {

@@ -1,6 +1,9 @@
 declare const require: any;
 
-import { DIRECT_MATCH_FUEL_COST } from '../../../../shared/src';
+import {
+  getMultiplayerTankFuelCost,
+  isMultiplayerTankTier,
+} from '../../../../shared/src';
 import {
   createJsonResponse,
   createOptionsResponse,
@@ -22,9 +25,14 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    const body = await readRequestBody(request);
+    const tankTier = isMultiplayerTankTier(body?.tankTier)
+      ? body.tankTier
+      : 'a';
     const result = await multiplayerStore.startDirectMatch(
       player,
-      DIRECT_MATCH_FUEL_COST,
+      getMultiplayerTankFuelCost(tankTier),
+      tankTier,
     );
     const abandonedMatchIds = Array.isArray(result.abandonedMatchIds)
       ? result.abandonedMatchIds
@@ -61,6 +69,14 @@ export async function POST(request: Request): Promise<Response> {
     }
   } catch (error) {
     return storeErrorResponse(request, error);
+  }
+}
+
+async function readRequestBody(request: Request): Promise<any> {
+  try {
+    return await request.json();
+  } catch {
+    return {};
   }
 }
 
