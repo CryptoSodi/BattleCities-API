@@ -1,6 +1,10 @@
 declare const require: any;
 
-import { isMatchId } from '../../../../shared/src';
+import {
+  getMultiplayerTankFuelCost,
+  isMatchId,
+  isMultiplayerTankTier,
+} from '../../../../shared/src';
 import {
   createJsonResponse,
   createOptionsResponse,
@@ -65,6 +69,9 @@ export async function POST(
     const result = await multiplayerStore.exitMatch(player, matchId);
     return createJsonResponse(request, result, result.ok ? 200 : 409);
   }
+  if (action === 'stage-rejoin') {
+    return rejoinStage(request, matchId, player);
+  }
   if (action === 'reconnect') {
     const assignment = await multiplayerStore.reconnect(player, matchId);
     if (assignment === null) {
@@ -108,6 +115,69 @@ export async function POST(
     );
   }
   return createJsonResponse(request, { ok: false, error: 'Unknown match action' }, 404);
+}
+
+async function rejoinStage(
+  request: Request,
+  matchId: string,
+  player: any,
+): Promise<Response> {
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
+  }
+  const tankTier = isMultiplayerTankTier(body?.tankTier)
+    ? body.tankTier
+    : 'a';
+  const stage = Math.max(1, Math.floor(Number(body?.stage) || 1));
+  try {
+    const assignment = await multiplayerStore.rejoinStagePlayer(
+      player,
+      matchId,
+      stage,
+      getMultiplayerTankFuelCost(tankTier),
+      tankTier,
+    );
+    if (assignment === null) {
+      return createJsonResponse(
+        request,
+        { ok: false, error: 'This player slot is not open for stage rejoin' },
+        409,
+      );
+    }
+    try {
+      await broadcasterService.configureStagePlayer(
+        matchId,
+        assignment.playerSlot,
+      );
+    } catch (error) {
+      console.error(
+        `[multiplayer] stage player configuration failed for ${matchId}`,
+        error,
+      );
+      return createJsonResponse(
+        request,
+        {
+          ok: false,
+          assignment,
+          error: 'Broadcaster is unavailable; stage rejoin can be retried',
+        },
+        503,
+      );
+    }
+    return createJsonResponse(request, { ok: true, assignment });
+  } catch (error) {
+    if ((error as any)?.code === 'INSUFFICIENT_FUEL') {
+      return createJsonResponse(
+        request,
+        { ok: false, error: (error as Error).message },
+        409,
+      );
+    }
+    throw error;
+  }
 }
 
 async function transitionStage(

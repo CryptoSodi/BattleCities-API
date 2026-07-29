@@ -514,6 +514,131 @@ async function reconnect(player, matchId) {
   });
 }
 
+async function rejoinStagePlayer(
+  player,
+  matchId,
+  requestedStage,
+  fuelCost,
+  tankTier = 'a',
+) {
+  return withSerializedMatchmaking(`stage:${matchId}`, async () => {
+    const match = await getMatch(matchId);
+    const stage = Math.max(1, Math.floor(Number(requestedStage) || 1));
+    if (
+      match === null ||
+      match.status !== 'transition' ||
+      match.stage !== stage
+    ) {
+      return null;
+    }
+
+    let playerSlot = null;
+    let participantActive = false;
+    let participantJoinedStage = 0;
+    if (hasPersistentConfig()) {
+      const result = await getPgPool().query(
+        `SELECT player_slot, active, joined_stage FROM ${PARTICIPANT_TABLE}
+         WHERE match_id = $1 AND player_id = $2
+         ORDER BY joined_at DESC
+         LIMIT 1`,
+        [matchId, player.id],
+      );
+      if (result.rowCount > 0) {
+        playerSlot = Number(result.rows[0].player_slot);
+        participantActive = result.rows[0].active === true;
+        participantJoinedStage = Number(result.rows[0].joined_stage) || 0;
+      }
+    } else {
+      const state = await readLocalState();
+      const participant = [...state.participants].reverse().find(
+        (item) => item.matchId === matchId && item.playerId === player.id,
+      );
+      playerSlot = participant?.playerSlot ?? null;
+      participantActive = participant?.active !== false;
+      participantJoinedStage = Number(participant?.joinedStage) || 0;
+    }
+    if (![0, 1].includes(playerSlot)) return null;
+    const slotIsOpen = (match.openSlots || []).includes(playerSlot);
+    if (
+      participantActive &&
+      participantJoinedStage === stage &&
+      !slotIsOpen
+    ) {
+      return {
+        match,
+        playerSlot,
+        fuelCharged: 0,
+        reconnected: true,
+      };
+    }
+    if (!slotIsOpen) return null;
+
+    const requestedFuel = Math.max(0, Math.floor(Number(fuelCost) || 0));
+    const chargedFuel = player.provider === 'guest' ? 0 : requestedFuel;
+    if (requestedFuel > 0) {
+      const account = await economyStore.debitFuel(player, requestedFuel, {
+        reason: 'multiplayer-stage-rejoin',
+        sourceType: 'multiplayer-match',
+        sourceId: matchId,
+      });
+      if (account === null) {
+        throw createStoreError('INSUFFICIENT_FUEL', 'Not enough fuel');
+      }
+    }
+
+    const now = new Date().toISOString();
+    if (hasPersistentConfig()) {
+      await getPgPool().query(
+        `UPDATE ${PARTICIPANT_TABLE}
+         SET active = TRUE, left_at = NULL, left_stage = NULL,
+             joined_at = $3, joined_stage = $4, tank_tier = $5,
+             fuel_charged = fuel_charged + $6
+         WHERE match_id = $1 AND player_id = $2`,
+        [
+          matchId,
+          player.id,
+          now,
+          stage,
+          normalizeTankTier(tankTier),
+          chargedFuel,
+        ],
+      );
+      await getPgPool().query(
+        `UPDATE ${MATCH_TABLE}
+         SET open_slots = array_remove(open_slots, $2), updated_at = $3
+         WHERE id = $1`,
+        [matchId, playerSlot, now],
+      );
+    } else {
+      const state = await readLocalState();
+      const participant = [...state.participants].reverse().find(
+        (item) => item.matchId === matchId && item.playerId === player.id,
+      );
+      const localMatch = state.matches.find((item) => item.id === matchId);
+      if (participant === undefined || localMatch === undefined) return null;
+      participant.active = true;
+      participant.leftAt = null;
+      participant.leftStage = null;
+      participant.joinedAt = now;
+      participant.joinedStage = stage;
+      participant.tankTier = normalizeTankTier(tankTier);
+      participant.fuelCharged += chargedFuel;
+      localMatch.openSlots = (localMatch.openSlots || []).filter(
+        (slot) => slot !== playerSlot,
+      );
+      localMatch.updatedAt = now;
+      await writeLocalState(state);
+    }
+
+    return {
+      match: await getMatch(matchId),
+      playerSlot,
+      fuelCharged: chargedFuel,
+      reconnected: true,
+    };
+  });
+}
+
 async function touchWaitingMatch(matchId) {
   const now = new Date().toISOString();
   if (hasPersistentConfig()) {
@@ -1591,6 +1716,7 @@ module.exports = {
   markStarted,
   markMatchStageStarted,
   reconnect,
+  rejoinStagePlayer,
   setBroadcasterState,
   startDirectMatch,
   startEventMatch,

@@ -145,7 +145,11 @@ async function getMatchRuntimeOptions(matchId) {
   };
 }
 
-async function configureStagePlayer(matchId, playerSlot) {
+async function configureStagePlayer(
+  matchId,
+  playerSlot,
+  replaceConnection = false,
+) {
   const config = getConfig();
   const options = await getMatchRuntimeOptions(matchId);
   const tier = options.initialPlayerTiers[playerSlot] || 'a';
@@ -164,7 +168,11 @@ async function configureStagePlayer(matchId, playerSlot) {
           authorization: `Bearer ${config.token}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ tankTier: tier, runConsumables }),
+        body: JSON.stringify({
+          tankTier: tier,
+          runConsumables,
+          replaceConnection,
+        }),
       },
     );
   } catch (cause) {

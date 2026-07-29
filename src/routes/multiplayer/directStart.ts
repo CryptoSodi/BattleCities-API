@@ -64,6 +64,7 @@ export async function POST(request: Request): Promise<Response> {
         await broadcasterService.configureStagePlayer(
           assignment.match.id,
           assignment.playerSlot,
+          true,
         );
       }
       return createJsonResponse(
