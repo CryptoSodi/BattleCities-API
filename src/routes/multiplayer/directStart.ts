@@ -29,10 +29,12 @@ export async function POST(request: Request): Promise<Response> {
     const tankTier = isMultiplayerTankTier(body?.tankTier)
       ? body.tankTier
       : 'a';
+    const stage = Math.max(1, Math.floor(Number(body?.stage) || 1));
     const result = await multiplayerStore.startDirectMatch(
       player,
       getMultiplayerTankFuelCost(tankTier),
       tankTier,
+      stage,
     );
     const abandonedMatchIds = Array.isArray(result.abandonedMatchIds)
       ? result.abandonedMatchIds
@@ -51,7 +53,16 @@ export async function POST(request: Request): Promise<Response> {
       return createJsonResponse(request, { ok: true, assignment }, 201);
     }
     try {
-      await broadcasterService.ensureMatchStarted(assignment.match.id, 1);
+      await broadcasterService.ensureMatchStarted(
+        assignment.match.id,
+        assignment.match.stage,
+      );
+      if (assignment.match.status === 'transition') {
+        await broadcasterService.configureStagePlayer(
+          assignment.match.id,
+          assignment.playerSlot,
+        );
+      }
       return createJsonResponse(
         request,
         { ok: true, assignment, runtime: createPlayerRuntime(request, assignment) },
@@ -82,6 +93,9 @@ async function readRequestBody(request: Request): Promise<any> {
 
 function storeErrorResponse(request: Request, error: any): Response {
   if (error?.code === 'INSUFFICIENT_FUEL') {
+    return createJsonResponse(request, { ok: false, error: error.message }, 409);
+  }
+  if (error?.code === 'STAGE_MATCH_UNAVAILABLE') {
     return createJsonResponse(request, { ok: false, error: error.message }, 409);
   }
   throw error;

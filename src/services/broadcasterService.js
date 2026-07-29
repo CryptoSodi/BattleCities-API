@@ -145,6 +145,43 @@ async function getMatchRuntimeOptions(matchId) {
   };
 }
 
+async function configureStagePlayer(matchId, playerSlot) {
+  const config = getConfig();
+  const options = await getMatchRuntimeOptions(matchId);
+  const tier = options.initialPlayerTiers[playerSlot] || 'a';
+  const runConsumables = options.playerRunConsumables[playerSlot] || {
+    powerups: [],
+    powerupCounts: [],
+  };
+  let response;
+  try {
+    response = await fetch(
+      `${config.baseUrl}/matches/${encodeURIComponent(matchId)}` +
+        `/players/${playerSlot + 1}`,
+      {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${config.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ tankTier: tier, runConsumables }),
+      },
+    );
+  } catch (cause) {
+    throw createServiceError(
+      'BROADCASTER_PLAYER_CONFIG_FAILED',
+      'Broadcaster is unavailable',
+      cause,
+    );
+  }
+  if (!response.ok) {
+    throw createServiceError(
+      'BROADCASTER_PLAYER_CONFIG_FAILED',
+      `Broadcaster rejected stage player configuration (${response.status})`,
+    );
+  }
+}
+
 function toRunConsumables(account) {
   const inventory =
     account !== null && typeof account?.inventory === 'object'
@@ -253,6 +290,7 @@ function createServiceError(code, message, cause) {
 }
 
 module.exports = {
+  configureStagePlayer,
   ensureMatchStarted,
   isAuthorizedRequest,
   stopMatch,

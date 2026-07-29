@@ -49,6 +49,12 @@ export async function POST(
   if (action === 'result') {
     return submitAuthoritativeResult(request, matchId);
   }
+  if (action === 'stage') {
+    return transitionStage(request, matchId);
+  }
+  if (action === 'stage-started') {
+    return markStageStarted(request, matchId);
+  }
 
   const player = await resolveSessionPlayer(request);
   if (player === null) {
@@ -68,7 +74,10 @@ export async function POST(
       return createJsonResponse(request, { ok: true, assignment });
     }
     try {
-      await broadcasterService.ensureMatchStarted(matchId, 1);
+      await broadcasterService.ensureMatchStarted(
+        matchId,
+        assignment.match.stage,
+      );
       return createJsonResponse(request, {
         ok: true,
         assignment,
@@ -99,6 +108,63 @@ export async function POST(
     );
   }
   return createJsonResponse(request, { ok: false, error: 'Unknown match action' }, 404);
+}
+
+async function transitionStage(
+  request: Request,
+  matchId: string,
+): Promise<Response> {
+  if (!broadcasterService.isAuthorizedRequest(request)) {
+    return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
+  }
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
+  }
+  try {
+    const match = await multiplayerStore.transitionMatchStage(
+      matchId,
+      body?.stageNumber,
+      body?.openSlots,
+      body?.scores,
+    );
+    return match === null
+      ? createJsonResponse(request, { ok: false, error: 'Match not found' }, 404)
+      : createJsonResponse(request, { ok: true, match });
+  } catch (error) {
+    if ((error as any)?.code === 'INVALID_STAGE_TRANSITION') {
+      return createJsonResponse(
+        request,
+        { ok: false, error: (error as Error).message },
+        409,
+      );
+    }
+    throw error;
+  }
+}
+
+async function markStageStarted(
+  request: Request,
+  matchId: string,
+): Promise<Response> {
+  if (!broadcasterService.isAuthorizedRequest(request)) {
+    return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
+  }
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
+  }
+  const match = await multiplayerStore.markMatchStageStarted(
+    matchId,
+    body?.stageNumber,
+  );
+  return match === null
+    ? createJsonResponse(request, { ok: false, error: 'Match not found' }, 404)
+    : createJsonResponse(request, { ok: true, match });
 }
 
 async function submitAuthoritativeResult(

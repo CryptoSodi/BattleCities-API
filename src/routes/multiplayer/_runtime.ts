@@ -6,7 +6,7 @@ import type {
 export function createPlayerRuntime(
   request: Request,
   assignment: MultiplayerAssignment,
-  level = 1,
+  level = assignment.match.stage,
 ): MultiplayerRuntimeConfig {
   const player = assignment.match.players.find(
     (candidate) => candidate.slot === assignment.playerSlot,
