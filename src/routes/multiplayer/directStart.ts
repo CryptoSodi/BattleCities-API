@@ -2,6 +2,7 @@ declare const require: any;
 
 import {
   getMultiplayerTankFuelCost,
+  isMatchId,
   isMultiplayerTankTier,
 } from '../../../../shared/src';
 import {
@@ -30,11 +31,13 @@ export async function POST(request: Request): Promise<Response> {
       ? body.tankTier
       : 'a';
     const stage = Math.max(1, Math.floor(Number(body?.stage) || 1));
+    const matchId = isMatchId(body?.matchId) ? body.matchId : null;
     const result = await multiplayerStore.startDirectMatch(
       player,
       getMultiplayerTankFuelCost(tankTier),
       tankTier,
       stage,
+      matchId,
     );
     const abandonedMatchIds = Array.isArray(result.abandonedMatchIds)
       ? result.abandonedMatchIds

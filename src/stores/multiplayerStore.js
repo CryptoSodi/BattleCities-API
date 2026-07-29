@@ -12,7 +12,7 @@ const SCORE_TABLE = 'battlecity_multiplayer_scores';
 const APPROVAL_TABLE = 'battlecity_event_prize_approvals';
 const OPEN_STATUSES = ['waiting', 'ready', 'live', 'transition'];
 const MAX_SCORE = 1000000;
-const WAITING_MATCH_ACTIVE_MS = 10000;
+const WAITING_MATCH_ACTIVE_MS = 120000;
 
 let localQueue = Promise.resolve();
 
@@ -36,9 +36,17 @@ function getDataPath() {
   );
 }
 
-async function startDirectMatch(player, fuelCost, tankTier = 'a', stage = 1) {
+async function startDirectMatch(
+  player,
+  fuelCost,
+  tankTier = 'a',
+  stage = 1,
+  preferredMatchId = null,
+) {
   return withSerializedMatchmaking('direct', async () => {
-    const abandonedMatchIds = await abandonOpenDirectMatches(player);
+    const abandonedMatchIds = stage === 1
+      ? await abandonOpenDirectMatches(player)
+      : [];
     const assignment = await startMatch(
       player,
       'direct',
@@ -48,6 +56,7 @@ async function startDirectMatch(player, fuelCost, tankTier = 'a', stage = 1) {
       false,
       tankTier,
       stage,
+      preferredMatchId,
     );
     return { ...assignment, abandonedMatchIds };
   });
@@ -79,6 +88,7 @@ async function startMatch(
   reconnectExisting = true,
   tankTier = 'a',
   requestedStage = 1,
+  preferredMatchId = null,
 ) {
   const stage = Math.max(1, Math.floor(Number(requestedStage) || 1));
   if (reconnectExisting) {
@@ -94,7 +104,13 @@ async function startMatch(
     eventEntryCreated = eventEntry.created;
   }
 
-  const openMatch = await findWaitingMatch(category, eventId, player.id, stage);
+  const openMatch = await findWaitingMatch(
+    category,
+    eventId,
+    player.id,
+    stage,
+    preferredMatchId,
+  );
   if (openMatch === null && stage > 1) {
     throw createStoreError(
       'STAGE_MATCH_UNAVAILABLE',
@@ -131,6 +147,13 @@ async function startMatch(
       );
     }
     await getPgPool().query(
+      `UPDATE ${PARTICIPANT_TABLE}
+       SET active = FALSE, left_stage = $4, left_at = $5
+       WHERE match_id = $1 AND player_slot = $2 AND player_id <> $3
+         AND active = TRUE`,
+      [matchId, playerSlot, player.id, stage - 1, now],
+    );
+    await getPgPool().query(
       `
         INSERT INTO ${PARTICIPANT_TABLE}
           (match_id, player_id, player_slot, join_token_hash,
@@ -159,6 +182,14 @@ async function startMatch(
         stage,
       ],
     );
+    if (stage > 1) {
+      await getPgPool().query(
+        `UPDATE ${MATCH_TABLE}
+         SET open_slots = array_remove(open_slots, $2), updated_at = $3
+         WHERE id = $1`,
+        [matchId, playerSlot, now],
+      );
+    }
     if (stage === 1 && playerSlot === 1) {
       await getPgPool().query(
         `
@@ -203,6 +234,25 @@ async function startMatch(
       joinedStage: stage,
       leftStage: null,
     });
+    if (stage > 1) {
+      const match = state.matches.find((item) => item.id === matchId);
+      state.participants.forEach((participant) => {
+        if (
+          participant !== state.participants[state.participants.length - 1] &&
+          participant.matchId === matchId &&
+          participant.playerSlot === playerSlot &&
+          participant.active !== false
+        ) {
+          participant.active = false;
+          participant.leftStage = stage - 1;
+          participant.leftAt = now;
+        }
+      });
+      match.openSlots = (match.openSlots || []).filter(
+        (slot) => slot !== playerSlot,
+      );
+      match.updatedAt = now;
+    }
     if (stage === 1 && playerSlot === 1) {
       const match = state.matches.find((item) => item.id === matchId);
       match.status = 'ready';
@@ -668,9 +718,10 @@ async function transitionMatchStage(matchId, stageNumber, openSlots, scores) {
       }
       await getPgPool().query(
         `UPDATE ${MATCH_TABLE}
-         SET status = 'transition', current_stage = $2, updated_at = $3
+         SET status = 'transition', current_stage = $2,
+             open_slots = $3::integer[], updated_at = $4
          WHERE id = $1`,
-        [matchId, nextStage, now],
+        [matchId, nextStage, slots, now],
       );
     } else {
       const state = await readLocalState();
@@ -706,6 +757,7 @@ async function transitionMatchStage(matchId, stageNumber, openSlots, scores) {
       const localMatch = state.matches.find((item) => item.id === matchId);
       localMatch.status = 'transition';
       localMatch.currentStage = nextStage;
+      localMatch.openSlots = [...slots];
       localMatch.updatedAt = now;
       await writeLocalState(state);
     }
@@ -721,7 +773,7 @@ async function markMatchStageStarted(matchId, stageNumber) {
     await ensureSchema();
     const result = await getPgPool().query(
       `UPDATE ${MATCH_TABLE}
-       SET status = 'live', updated_at = $3
+       SET status = 'live', open_slots = '{}', updated_at = $3
        WHERE id = $1 AND current_stage = $2
          AND status IN ('transition', 'live')
        RETURNING id`,
@@ -739,6 +791,7 @@ async function markMatchStageStarted(matchId, stageNumber) {
     return null;
   }
   match.status = 'live';
+  match.openSlots = [];
   match.updatedAt = now;
   await writeLocalState(state);
   return getMatch(matchId);
@@ -1070,6 +1123,7 @@ async function getMatch(matchId) {
     const result = await getPgPool().query(
       `
         SELECT m.id, m.category, m.event_id, m.status, m.current_stage,
+          m.open_slots,
           m.created_at,
           m.started_at, m.completed_at, p.player_id, p.player_slot,
           p.tank_tier,
@@ -1205,7 +1259,13 @@ async function rotateAssignmentToken(
   };
 }
 
-async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
+async function findWaitingMatch(
+  category,
+  eventId,
+  excludedPlayerId,
+  stage,
+  preferredMatchId = null,
+) {
   const activeAfter = new Date(
     Date.now() - WAITING_MATCH_ACTIVE_MS,
   ).toISOString();
@@ -1215,6 +1275,7 @@ async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
       `
         SELECT m.id,
           CASE
+            WHEN $5 > 1 THEN m.open_slots[1]
             WHEN NOT EXISTS (
               SELECT 1 FROM ${PARTICIPANT_TABLE} p0
               WHERE p0.match_id = m.id AND p0.player_slot = 0
@@ -1226,30 +1287,39 @@ async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
         WHERE m.category = $1
           AND m.event_id IS NOT DISTINCT FROM $2
           AND m.current_stage = $5
+          AND ($6::text IS NULL OR m.id = $6)
           AND (
             ($5 = 1 AND m.status = 'waiting') OR
             ($5 > 1 AND m.status = 'transition')
           )
+          AND ($5 = 1 OR cardinality(m.open_slots) > 0)
           AND (
             $5 > 1 OR
             m.category <> 'direct' OR
             m.updated_at >= $4
           )
-          AND NOT EXISTS (
+          AND ($5 > 1 OR NOT EXISTS (
             SELECT 1 FROM ${PARTICIPANT_TABLE} p
             WHERE p.match_id = m.id AND p.player_id = $3
               AND p.active = TRUE
-          )
-          AND (
+          ))
+          AND ($5 > 1 OR (
             SELECT COUNT(*) FROM ${PARTICIPANT_TABLE} active_participant
             WHERE active_participant.match_id = m.id
               AND active_participant.active = TRUE
-          ) < 2
+          ) < 2)
         ORDER BY m.created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       `,
-      [category, eventId, excludedPlayerId, activeAfter, stage],
+      [
+        category,
+        eventId,
+        excludedPlayerId,
+        activeAfter,
+        stage,
+        preferredMatchId,
+      ],
     );
     return result.rowCount === 0
       ? null
@@ -1265,6 +1335,7 @@ async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
         match.category === category &&
         match.eventId === eventId &&
         (match.currentStage || 1) === stage &&
+        (preferredMatchId === null || match.id === preferredMatchId) &&
         (
           (stage === 1 && match.status === 'waiting') ||
           (stage > 1 && match.status === 'transition')
@@ -1274,15 +1345,16 @@ async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
           match.category !== 'direct' ||
           Date.parse(match.updatedAt) >= activeAfterTimestamp
         ) &&
-        !state.participants.some(
+        (stage > 1 || !state.participants.some(
           (item) =>
             item.matchId === match.id &&
             item.playerId === excludedPlayerId &&
             item.active !== false,
-        ) &&
+        )) &&
         state.participants.filter(
           (item) => item.matchId === match.id && item.active !== false,
-        ).length < 2,
+        ).length < 2 &&
+        (stage === 1 || (match.openSlots || []).length > 0),
     ) || null;
   if (match === null) return null;
   const activeSlots = new Set(
@@ -1290,7 +1362,12 @@ async function findWaitingMatch(category, eventId, excludedPlayerId, stage) {
       .filter((item) => item.matchId === match.id && item.active !== false)
       .map((item) => item.playerSlot),
   );
-  return { ...match, playerSlot: activeSlots.has(0) ? 1 : 0 };
+  return {
+    ...match,
+    playerSlot: stage > 1
+      ? match.openSlots[0]
+      : activeSlots.has(0) ? 1 : 0,
+  };
 }
 
 async function readEventEntry(eventId, playerId) {
@@ -1369,6 +1446,9 @@ function toPublicDatabaseMatch(rows) {
     eventId: first.event_id,
     status: first.status,
     stage: Math.max(1, Number(first.current_stage) || 1),
+    openSlots: Array.isArray(first.open_slots)
+      ? first.open_slots.map(Number).filter((slot) => [0, 1].includes(slot))
+      : [],
     players: rows
       .filter((row) => row.player_id !== null)
       .map((row) => ({
@@ -1392,6 +1472,7 @@ function toPublicLocalMatch(state, match) {
     eventId: match.eventId,
     status: match.status,
     stage: Math.max(1, Number(match.currentStage) || 1),
+    openSlots: Array.isArray(match.openSlots) ? [...match.openSlots] : [],
     players: state.participants
       .filter(
         (participant) =>
