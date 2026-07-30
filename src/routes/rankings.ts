@@ -118,6 +118,7 @@ async function resolveMe(
 
 function toPublicRow(row: any): any {
   return {
+    playerId: row.playerId,
     rank: row.rank,
     displayName: row.displayName,
     walletAddress: row.walletAddress,
