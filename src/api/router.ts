@@ -12,6 +12,7 @@ import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
 import * as discordInteractions from '../routes/integrations/discord/interactions';
+import * as discordVerification from '../routes/integrations/discord/verification';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
@@ -59,6 +60,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'events/leaderboard': eventLeaderboard,
   health,
   'integrations/discord/interactions': discordInteractions,
+  'integrations/discord/verification': discordVerification,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,

@@ -10,6 +10,7 @@ const LIMITS = {
   'matches-submit': { max: 10, windowMs: 60 * 1000 },
   'swap-verify': { max: 20, windowMs: 60 * 1000 },
   'quest-claim': { max: 20, windowMs: 60 * 1000 },
+  'discord-verification-code': { max: 5, windowMs: 60 * 1000 },
   'staking-action': { max: 20, windowMs: 60 * 1000 },
 };
 

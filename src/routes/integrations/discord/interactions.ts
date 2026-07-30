@@ -3,6 +3,7 @@ declare const require: any;
 import { createJsonResponse } from '../../_helpers';
 
 const nodeCrypto = require('crypto');
+const discordVerificationStore = require('../../../stores/discordVerificationStore');
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 export async function POST(request: Request): Promise<Response> {
@@ -37,6 +38,10 @@ export async function POST(request: Request): Promise<Response> {
     return createJsonResponse(request, { type: 1 });
   }
 
+  if (interaction?.type === 2 && interaction?.data?.name === 'verify') {
+    return handleVerifyCommand(request, interaction);
+  }
+
   // Keep the endpoint valid while the /verify command flow is being built.
   return createJsonResponse(request, {
     type: 4,
@@ -44,6 +49,39 @@ export async function POST(request: Request): Promise<Response> {
       content: 'Battle Cities verification is not available yet.',
       flags: 64,
     },
+  });
+}
+
+async function handleVerifyCommand(
+  request: Request,
+  interaction: any,
+): Promise<Response> {
+  const expectedGuildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+  if (expectedGuildId === '' || interaction.guild_id !== expectedGuildId) {
+    return discordMessage(request, 'This command is only available in the Battle Cities server.');
+  }
+
+  const code = interaction.data?.options?.find(
+    (option: any) => option?.name === 'code',
+  )?.value;
+  const user = interaction.member?.user || interaction.user;
+  const result = await discordVerificationStore.verifyCode(
+    code,
+    user?.id,
+    user?.global_name || user?.username,
+  );
+  return discordMessage(
+    request,
+    result.ok
+      ? 'Discord verified. Return to Battle Cities to see your completed quest.'
+      : result.error || 'Discord verification failed.',
+  );
+}
+
+function discordMessage(request: Request, content: string): Response {
+  return createJsonResponse(request, {
+    type: 4,
+    data: { content, flags: 64 },
   });
 }
 
