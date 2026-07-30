@@ -46,6 +46,9 @@ Create a separate Vercel project from this repository with these settings:
 Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `GOOGLE_OAUTH_STATE_SECRET`, `BATTLECITY_WEB_BASE_URL`,
 `BROADCASTER_BASE_URL`, and `BROADCASTER_SERVICE_TOKEN` in the API project.
+Discord HTTP interaction verification additionally requires
+`DISCORD_APPLICATION_PUBLIC_KEY`, copied from the Discord application's General
+Information page.
 Set `BATTLECITY_WEB_BASE_URL=https://www.battlecities.com`. Production replay
 storage also requires `BLOB_READ_WRITE_TOKEN`. A small per-instance pool such
 as `BATTLECITY_DATABASE_POOL_SIZE=2` is recommended for Vercel because the Neon
