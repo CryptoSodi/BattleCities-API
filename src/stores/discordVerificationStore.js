@@ -69,6 +69,27 @@ async function readVerification(playerId) {
   );
 }
 
+async function isDiscordUserVerified(discordUserId) {
+  if (!isValidDiscordUserId(discordUserId)) {
+    return false;
+  }
+
+  if (!hasPersistentConfig()) {
+    const playerId = localPlayerIdByDiscordUserId.get(discordUserId);
+    return Boolean(playerId && localByPlayerId.get(playerId)?.verifiedAt);
+  }
+
+  await database.assertMigrationsApplied();
+  const result = await database.getPool().query(
+    `SELECT 1
+       FROM battlecity_discord_verifications
+       WHERE discord_user_id = $1 AND verified_at IS NOT NULL
+       LIMIT 1`,
+    [discordUserId],
+  );
+  return result.rows.length > 0;
+}
+
 async function createVerificationCode(playerId) {
   if (!hasPersistentConfig()) {
     return createLocalVerificationCode(playerId);
@@ -295,6 +316,7 @@ function toIso(value) {
 
 module.exports = {
   createVerificationCode,
+  isDiscordUserVerified,
   readVerification,
   verifyDiscordAccount,
   verifyCode,

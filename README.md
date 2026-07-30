@@ -89,6 +89,9 @@ DISCORD_CLIENT_ID=<Discord Application ID>
 DISCORD_CLIENT_SECRET=<Discord OAuth2 client secret>
 DISCORD_OAUTH_STATE_SECRET=<new strong random secret>
 DISCORD_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/discord/oauth/callback
+
+# Shared only with the Discord bot service; never the frontend
+DISCORD_BOT_SERVICE_TOKEN=<new strong random secret>
 ```
 
 `DISCORD_APPLICATION_PUBLIC_KEY` is public application metadata, but every
@@ -113,6 +116,17 @@ The signed interactions endpoint keeps `/verify CODE` as a fallback. The game
 uses the automatic OAuth flow at `/integrations/discord/oauth/start`; it uses
 `identify` and `guilds.members.read` to confirm that the logged-in player
 belongs to `DISCORD_GUILD_ID`.
+
+The Discord bot reads role-assignment state through the bot-only endpoint:
+
+```text
+GET /api/integrations/discord/verified-users/:discordUserId
+Authorization: Bearer <DISCORD_BOT_SERVICE_TOKEN>
+```
+
+It returns only `{ ok, discordUserId, verified }`. The bot owns its
+`DISCORD_BOT_TOKEN`, role ID, and role assignment; those values must not be
+configured on this API.
 
 Production migration builds use a PostgreSQL advisory lock, so overlapping
 deployments wait for one another instead of applying the same migration

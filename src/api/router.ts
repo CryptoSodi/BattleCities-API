@@ -12,6 +12,7 @@ import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
 import * as discordInteractions from '../routes/integrations/discord/interactions';
+import * as discordVerifiedUsers from '../routes/integrations/discord/verifiedUsers';
 import * as discordVerification from '../routes/integrations/discord/verification';
 import * as discordOAuthCallback from '../routes/integrations/discord/oauth/callback';
 import * as discordOAuthStart from '../routes/integrations/discord/oauth/start';
@@ -90,6 +91,7 @@ const multiplayerMatchActionRoutePattern = /^multiplayer\/matches\/([^/]+)\/([^/
 const multiplayerArchiveRoutePattern = /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
 const multiplayerEventRoutePattern = /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
 const playerProfileRoutePattern = /^players\/([^/]+)\/profile$/;
+const discordVerifiedUserRoutePattern = /^integrations\/discord\/verified-users\/([^/]+)$/;
 
 function resolveRoute(request: Request): string {
   const url = new URL(request.url);
@@ -104,6 +106,18 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  const discordVerifiedUserMatch = route.match(discordVerifiedUserRoutePattern);
+  if (discordVerifiedUserMatch !== null) {
+    const [, discordUserId] = discordVerifiedUserMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return discordVerifiedUsers.GET(request, discordUserId);
+    }
+    if (method === 'OPTIONS') {
+      return discordVerifiedUsers.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, OPTIONS');
+  }
   const playerProfileMatch = route.match(playerProfileRoutePattern);
   if (playerProfileMatch !== null) {
     const [, playerId] = playerProfileMatch;
