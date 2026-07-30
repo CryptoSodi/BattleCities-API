@@ -46,10 +46,6 @@ Create a separate Vercel project from this repository with these settings:
 Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
 `GOOGLE_OAUTH_STATE_SECRET`, `BATTLECITY_WEB_BASE_URL`,
 `BROADCASTER_BASE_URL`, and `BROADCASTER_SERVICE_TOKEN` in the API project.
-Discord HTTP interaction verification additionally requires
-`DISCORD_APPLICATION_PUBLIC_KEY`, copied from the Discord application's General
-Information page, and `DISCORD_GUILD_ID`, set to the Battle Cities Discord
-server ID. Neither value belongs in the frontend project.
 Set `BATTLECITY_WEB_BASE_URL=https://www.battlecities.com`. Production replay
 storage also requires `BLOB_READ_WRITE_TOKEN`. A small per-instance pool such
 as `BATTLECITY_DATABASE_POOL_SIZE=2` is recommended for Vercel because the Neon
@@ -77,6 +73,46 @@ The service token must exactly match the headless broadcaster token and must
 never be configured in the frontend Vercel project. The complete three-project
 setup is documented in
 [Deployment Environment Setup](../docs/environment-setup.md).
+
+### Discord verification
+
+Discord verification is owned by the Vercel API. Configure these variables on
+the **battle-cities-api** Vercel project only:
+
+```env
+# Required for signed Discord HTTP interactions and /verify CODE fallback
+DISCORD_APPLICATION_PUBLIC_KEY=<Discord Developer Portal General Information Public Key>
+DISCORD_GUILD_ID=<Battle Cities Discord server ID>
+
+# Required when automatic Discord OAuth verification is enabled
+DISCORD_CLIENT_ID=<Discord Application ID>
+DISCORD_CLIENT_SECRET=<Discord OAuth2 client secret>
+DISCORD_OAUTH_STATE_SECRET=<new strong random secret>
+DISCORD_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/discord/oauth/callback
+```
+
+`DISCORD_APPLICATION_PUBLIC_KEY` is public application metadata, but every
+other Discord value above must remain private. Do not add any of them to the
+frontend Vercel project. `DISCORD_BOT_TOKEN` belongs only to the separate bot
+project and is not needed by the API for verification.
+
+`DISCORD_APP_PUBLIC_KEY` and `DISCORD_PUBLIC_KEY` are accepted as aliases for
+`DISCORD_APPLICATION_PUBLIC_KEY` to support existing Vercel configuration.
+
+In Discord Developer Portal configure these URLs after the API is deployed:
+
+```text
+Interactions Endpoint URL
+https://api.battlecities.com/api/integrations/discord/interactions
+
+OAuth2 Redirect URL
+https://api.battlecities.com/api/integrations/discord/oauth/callback
+```
+
+The signed interactions endpoint keeps `/verify CODE` as a fallback. The game
+uses the automatic OAuth flow at `/integrations/discord/oauth/start`; it uses
+`identify` and `guilds.members.read` to confirm that the logged-in player
+belongs to `DISCORD_GUILD_ID`.
 
 Production migration builds use a PostgreSQL advisory lock, so overlapping
 deployments wait for one another instead of applying the same migration

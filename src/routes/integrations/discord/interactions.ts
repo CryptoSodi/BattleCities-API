@@ -8,7 +8,10 @@ const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 export async function POST(request: Request): Promise<Response> {
   const publicKeyHex = String(
-    process.env.DISCORD_APPLICATION_PUBLIC_KEY || '',
+    process.env.DISCORD_APPLICATION_PUBLIC_KEY ||
+      process.env.DISCORD_APP_PUBLIC_KEY ||
+      process.env.DISCORD_PUBLIC_KEY ||
+      '',
   ).trim();
   if (!/^[0-9a-f]{64}$/i.test(publicKeyHex)) {
     return createJsonResponse(
@@ -22,8 +25,14 @@ export async function POST(request: Request): Promise<Response> {
   const timestamp = request.headers.get('x-signature-timestamp') || '';
   const rawBody = await request.text();
 
-  if (!isValidDiscordSignature(publicKeyHex, signatureHex, timestamp, rawBody)) {
-    return createJsonResponse(request, { error: 'Invalid request signature' }, 401);
+  if (
+    !isValidDiscordSignature(publicKeyHex, signatureHex, timestamp, rawBody)
+  ) {
+    return createJsonResponse(
+      request,
+      { error: 'Invalid request signature' },
+      401,
+    );
   }
 
   let interaction: any;
@@ -58,7 +67,10 @@ async function handleVerifyCommand(
 ): Promise<Response> {
   const expectedGuildId = String(process.env.DISCORD_GUILD_ID || '').trim();
   if (expectedGuildId === '' || interaction.guild_id !== expectedGuildId) {
-    return discordMessage(request, 'This command is only available in the Battle Cities server.');
+    return discordMessage(
+      request,
+      'This command is only available in the Battle Cities server.',
+    );
   }
 
   const code = interaction.data?.options?.find(

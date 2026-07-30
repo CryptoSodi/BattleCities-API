@@ -13,6 +13,8 @@ import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
 import * as discordInteractions from '../routes/integrations/discord/interactions';
 import * as discordVerification from '../routes/integrations/discord/verification';
+import * as discordOAuthCallback from '../routes/integrations/discord/oauth/callback';
+import * as discordOAuthStart from '../routes/integrations/discord/oauth/start';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
@@ -38,10 +40,7 @@ import * as tradingTokens from '../routes/trading/tokens';
 import * as tradingVerifySwap from '../routes/trading/verify-swap';
 import * as webrtcSignals from '../routes/webrtcSignals';
 import * as webrtcObservers from '../routes/webrtcObservers';
-import {
-  createJsonResponse,
-  createOptionsResponse,
-} from '../routes/_helpers';
+import { createJsonResponse, createOptionsResponse } from '../routes/_helpers';
 
 type RouteHandler = (request: Request) => Response | Promise<Response>;
 
@@ -61,6 +60,8 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   health,
   'integrations/discord/interactions': discordInteractions,
   'integrations/discord/verification': discordVerification,
+  'integrations/discord/oauth/callback': discordOAuthCallback,
+  'integrations/discord/oauth/start': discordOAuthStart,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,
@@ -82,18 +83,12 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'trading/verify-swap': tradingVerifySwap,
 };
 
-const webrtcSignalRoutePattern =
-  /^webrtc\/matches\/([^/]+)\/players\/([^/]+)\/signals\/([^/]+)$/;
-const webrtcObserverRoutePattern =
-  /^webrtc\/matches\/([^/]+)\/observers$/;
-const multiplayerMatchRoutePattern =
-  /^multiplayer\/matches\/([^/]+)$/;
-const multiplayerMatchActionRoutePattern =
-  /^multiplayer\/matches\/([^/]+)\/([^/]+)$/;
-const multiplayerArchiveRoutePattern =
-  /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
-const multiplayerEventRoutePattern =
-  /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
+const webrtcSignalRoutePattern = /^webrtc\/matches\/([^/]+)\/players\/([^/]+)\/signals\/([^/]+)$/;
+const webrtcObserverRoutePattern = /^webrtc\/matches\/([^/]+)\/observers$/;
+const multiplayerMatchRoutePattern = /^multiplayer\/matches\/([^/]+)$/;
+const multiplayerMatchActionRoutePattern = /^multiplayer\/matches\/([^/]+)\/([^/]+)$/;
+const multiplayerArchiveRoutePattern = /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
+const multiplayerEventRoutePattern = /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
 const playerProfileRoutePattern = /^players\/([^/]+)\/profile$/;
 
 function resolveRoute(request: Request): string {
@@ -162,7 +157,9 @@ async function dispatch(request: Request): Promise<Response> {
     return methodNotAllowed('GET, POST, OPTIONS');
   }
 
-  const multiplayerMatchAction = route.match(multiplayerMatchActionRoutePattern);
+  const multiplayerMatchAction = route.match(
+    multiplayerMatchActionRoutePattern,
+  );
   if (multiplayerMatchAction !== null) {
     const [, matchId, action] = multiplayerMatchAction;
     const method = request.method.toUpperCase();

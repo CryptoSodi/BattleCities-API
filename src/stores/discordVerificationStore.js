@@ -19,7 +19,10 @@ function normalizeCode(value) {
 }
 
 function hashCode(code) {
-  return crypto.createHash('sha256').update(code).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(code)
+    .digest('hex');
 }
 
 function createCode() {
@@ -120,7 +123,10 @@ async function verifyCode(code, discordUserId, discordUsername) {
     );
     const codeRecord = codeResult.rows[0];
     if (!codeRecord) {
-      return { ok: false, error: 'That verification code is invalid or expired' };
+      return {
+        ok: false,
+        error: 'That verification code is invalid or expired',
+      };
     }
 
     const linkedResult = await pool.query(
@@ -146,9 +152,62 @@ async function verifyCode(code, discordUserId, discordUsername) {
            verified_at = $3,
            updated_at = NOW()
        WHERE player_id = $4`,
-      [discordUserId, normalizeDiscordUsername(discordUsername), verifiedAt, codeRecord.player_id],
+      [
+        discordUserId,
+        normalizeDiscordUsername(discordUsername),
+        verifiedAt,
+        codeRecord.player_id,
+      ],
     );
     return { ok: true, playerId: codeRecord.player_id, verifiedAt };
+  });
+}
+
+async function verifyDiscordAccount(playerId, discordUserId, discordUsername) {
+  if (!isValidDiscordUserId(discordUserId)) {
+    return { ok: false, error: 'Invalid Discord account' };
+  }
+
+  if (!hasPersistentConfig()) {
+    return verifyLocalDiscordAccount(playerId, discordUserId, discordUsername);
+  }
+
+  await database.assertMigrationsApplied();
+  return database.withTransaction(async () => {
+    const pool = database.getPool();
+    const linkedResult = await pool.query(
+      `SELECT player_id FROM battlecity_discord_verifications
+       WHERE discord_user_id = $1 FOR UPDATE`,
+      [discordUserId],
+    );
+    const linkedPlayerId = linkedResult.rows[0]?.player_id || null;
+    if (linkedPlayerId !== null && linkedPlayerId !== playerId) {
+      return {
+        ok: false,
+        error: 'This Discord account is already verified to another player',
+      };
+    }
+
+    const verifiedAt = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO battlecity_discord_verifications
+         (player_id, discord_user_id, discord_username, verified_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (player_id) DO UPDATE SET
+         discord_user_id = EXCLUDED.discord_user_id,
+         discord_username = EXCLUDED.discord_username,
+         code_hash = NULL,
+         code_expires_at = NULL,
+         verified_at = EXCLUDED.verified_at,
+         updated_at = NOW()`,
+      [
+        playerId,
+        discordUserId,
+        normalizeDiscordUsername(discordUsername),
+        verifiedAt,
+      ],
+    );
+    return { ok: true, playerId, verifiedAt };
   });
 }
 
@@ -180,9 +239,10 @@ function verifyLocalCode(code, discordUserId, discordUsername) {
   }
 
   const expectedHash = hashCode(code);
-  const entry = Array.from(localByPlayerId.entries()).find(([, record]) =>
-    record.codeHash === expectedHash &&
-    new Date(record.codeExpiresAt).getTime() > Date.now(),
+  const entry = Array.from(localByPlayerId.entries()).find(
+    ([, record]) =>
+      record.codeHash === expectedHash &&
+      new Date(record.codeExpiresAt).getTime() > Date.now(),
   );
   if (!entry) {
     return { ok: false, error: 'That verification code is invalid or expired' };
@@ -195,6 +255,27 @@ function verifyLocalCode(code, discordUserId, discordUsername) {
   record.discordUserId = discordUserId;
   record.discordUsername = normalizeDiscordUsername(discordUsername);
   record.verifiedAt = verifiedAt;
+  localPlayerIdByDiscordUserId.set(discordUserId, playerId);
+  return { ok: true, playerId, verifiedAt };
+}
+
+function verifyLocalDiscordAccount(playerId, discordUserId, discordUsername) {
+  const linkedPlayerId = localPlayerIdByDiscordUserId.get(discordUserId);
+  if (linkedPlayerId && linkedPlayerId !== playerId) {
+    return {
+      ok: false,
+      error: 'This Discord account is already verified to another player',
+    };
+  }
+
+  const verifiedAt = new Date().toISOString();
+  localByPlayerId.set(playerId, {
+    codeHash: null,
+    codeExpiresAt: null,
+    discordUserId,
+    discordUsername: normalizeDiscordUsername(discordUsername),
+    verifiedAt,
+  });
   localPlayerIdByDiscordUserId.set(discordUserId, playerId);
   return { ok: true, playerId, verifiedAt };
 }
@@ -215,5 +296,6 @@ function toIso(value) {
 module.exports = {
   createVerificationCode,
   readVerification,
+  verifyDiscordAccount,
   verifyCode,
 };
