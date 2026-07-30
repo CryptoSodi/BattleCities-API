@@ -18,6 +18,7 @@ import * as multiplayerEvents from '../routes/multiplayer/events';
 import * as multiplayerMatches from '../routes/multiplayer/matches';
 import * as phases from '../routes/phases';
 import * as player from '../routes/player';
+import * as playerProfile from '../routes/players/profile';
 import * as quests from '../routes/quests';
 import * as questClaim from '../routes/quests/claim';
 import * as rankings from '../routes/rankings';
@@ -89,6 +90,7 @@ const multiplayerArchiveRoutePattern =
   /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
 const multiplayerEventRoutePattern =
   /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
+const playerProfileRoutePattern = /^players\/([^/]+)\/profile$/;
 
 function resolveRoute(request: Request): string {
   const url = new URL(request.url);
@@ -103,6 +105,18 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  const playerProfileMatch = route.match(playerProfileRoutePattern);
+  if (playerProfileMatch !== null) {
+    const [, playerId] = playerProfileMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return playerProfile.GET(request, playerId);
+    }
+    if (method === 'OPTIONS') {
+      return playerProfile.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, OPTIONS');
+  }
   const multiplayerArchiveMatch = route.match(multiplayerArchiveRoutePattern);
   if (multiplayerArchiveMatch !== null) {
     const [, matchId = null, action = null] = multiplayerArchiveMatch;

@@ -244,6 +244,75 @@ async function getPlayerRank(playerId, seasonId) {
   };
 }
 
+async function getPlayerResults(playerId, limit = 10) {
+  if (!isValidPlayerId(playerId)) {
+    return [];
+  }
+
+  const safeLimit = Math.max(
+    1,
+    Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 10),
+  );
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `
+        SELECT id, season_id, mode, level_number, score, game_points, won,
+          validation_status, created_at
+        FROM ${TABLE_NAME}
+        WHERE player_id = $1 AND validation_status <> 'rejected'
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [playerId, safeLimit],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      seasonId: row.season_id,
+      mode: row.mode,
+      levelNumber: Number(row.level_number),
+      score: Number(row.score),
+      gamePoints: Number(row.game_points),
+      won: row.won === true,
+      validationStatus: row.validation_status,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+  }
+
+  let files;
+  try {
+    files = await fs.readdir(getDataDir());
+  } catch {
+    return [];
+  }
+
+  const results = [];
+  for (const file of files) {
+    if (!file.endsWith('.json')) {
+      continue;
+    }
+    try {
+      const result = JSON.parse(
+        await fs.readFile(path.join(getDataDir(), file), 'utf8'),
+      );
+      if (
+        result.playerId === playerId &&
+        result.validationStatus !== 'rejected'
+      ) {
+        results.push(toPublicResult(result));
+      }
+    } catch {
+      // Ignore malformed local development records.
+    }
+  }
+
+  return results
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .slice(0, safeLimit);
+}
+
 async function aggregateFileResults(scopeSeasonId) {
   let files;
   try {
@@ -343,6 +412,7 @@ module.exports = {
   computeGamePoints,
   getLeaderboard,
   getPlayerRank,
+  getPlayerResults,
   submitResult,
   toPublicResult,
   isPersistentStoreConfigured: hasPersistentConfig,
