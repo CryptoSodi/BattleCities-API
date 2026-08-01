@@ -13,8 +13,12 @@ backend jobs.
 From the repository root:
 
 ```powershell
-npm run api:build
-npm run api:start
+$env:BATTLECITY_EMBED_BROADCASTER = '1'
+$env:BROADCASTER_BASE_URL = 'http://127.0.0.1:3001'
+$env:BROADCASTER_API_URL = 'http://127.0.0.1:3001'
+$env:BROADCASTER_PUBLIC_URL = 'http://127.0.0.1:3001'
+npm run server:build
+npm run server:start
 ```
 
 With the API running, validate health, CORS, and signaling from another
@@ -31,53 +35,49 @@ npm run api:build
 npm --prefix api-server run smoke:local
 ```
 
-## Vercel deployment
+## Production deployment
 
-Create a separate Vercel project from this repository with these settings:
+Production runs natively on Ubuntu as one Node process containing both the API
+and authoritative broadcaster. Build both outputs before starting:
 
-- Root Directory: `api-server`
-- Framework Preset: `Other`
-- Build and Output settings: leave the project defaults unchanged; the
-  package's `vercel.json` runs production database migrations and deploys
-  `api/router.ts` as a Vercel Function. The minimal `public` directory satisfies
-  Vercel's custom-build output requirement without deploying the game UI.
-  Preview builds skip migrations so they cannot change the production schema.
+```bash
+npm run server:build
+npm run server:start
+```
 
-Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-`GOOGLE_OAUTH_STATE_SECRET`, `BATTLECITY_WEB_BASE_URL`,
-`BROADCASTER_BASE_URL`, and `BROADCASTER_SERVICE_TOKEN` in the API project.
-Set `BATTLECITY_WEB_BASE_URL=https://www.battlecities.com`. Production replay
-storage also requires `BLOB_READ_WRITE_TOKEN`. A small per-instance pool such
-as `BATTLECITY_DATABASE_POOL_SIZE=2` is recommended for Vercel because the Neon
-URL is already pooled.
+Configure `DATABASE_URL`, Google/Discord credentials,
+`BATTLECITY_WEB_BASE_URL`, and the embedded runtime values in
+`/etc/battlecities/api.env`. Use
+`BATTLECITY_DATABASE_POOL_SIZE=2` on the 1 GB server.
 
-After deployment, assign `api.battlecities.com` to the API project and verify:
+After deployment verify:
 
 ```text
 https://api.battlecities.com/api/health
 https://api.battlecities.com/api/ready
 ```
 
-The frontend Vercel project must set
+The frontend Vercel project only needs
 `BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
 
-The multiplayer deployment-specific values are:
+The combined multiplayer values are:
 
 ```env
-# Vercel API project only
-BROADCASTER_BASE_URL=https://broadcaster.battlecities.com
-BROADCASTER_SERVICE_TOKEN=replace-with-a-strong-random-secret
+BATTLECITY_EMBED_BROADCASTER=1
+BROADCASTER_BASE_URL=http://127.0.0.1:3001
+BROADCASTER_API_URL=http://127.0.0.1:3001
+BROADCASTER_PUBLIC_URL=https://api.battlecities.com
+BROADCASTER_CLIENT_URL=https://www.battlecities.com
 ```
 
-The service token must exactly match the headless broadcaster token and must
-never be configured in the frontend Vercel project. The complete three-project
-setup is documented in
+Embedded mode generates its private route-authorization token automatically at
+startup. The native Ubuntu setup is documented in
 [Deployment Environment Setup](../docs/environment-setup.md).
 
 ### Discord verification
 
-Discord verification is owned by the Vercel API. Configure these variables on
-the **battle-cities-api** Vercel project only:
+Discord verification is owned by the native API. Configure these variables in
+`/etc/battlecities/api.env` only:
 
 ```env
 # Required for signed Discord HTTP interactions and /verify CODE fallback
@@ -155,10 +155,10 @@ Useful variables:
   set it to `https://www.battlecities.com` in production.
 - `BATTLECITY_EVENT_ADMIN_SECRET`: bearer token required to approve final event
   prize allocations after an event ends.
-- `BROADCASTER_BASE_URL`: private API-to-broadcaster service origin; production
-  uses `https://broadcaster.battlecities.com`.
-- `BROADCASTER_SERVICE_TOKEN`: shared bearer secret used only by the Vercel API
-  and broadcaster service. Never configure it in the frontend project.
+- `BROADCASTER_BASE_URL`: loopback broadcaster-control origin; embedded
+  production uses `http://127.0.0.1:3001`.
+- `BROADCASTER_SERVICE_TOKEN`: generated automatically for embedded mode. Set it
+  manually only when running the legacy standalone broadcaster command.
 
 ## Multiplayer API
 
