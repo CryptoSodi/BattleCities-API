@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Battle City WebRTC Latency Test</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #11140f;
+        --panel: #1c2117;
+        --panel-2: #252b1d;
+        --line: #5d6735;
+        --text: #f4f1d2;
+        --muted: #b7b37e;
+        --green: #7ec850;
+        --yellow: #f0c94d;
+        --red: #e25b43;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 50% 0, #202819 0, var(--bg) 54%);
+        color: var(--text);
+        font-family:
+          "Arial Black",
+          Impact,
+          system-ui,
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      main {
+        width: min(960px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 28px 0;
+      }
+
+      h1,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(30px, 6vw, 54px);
+        line-height: 1;
+        color: var(--yellow);
+      }
+
+      p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-family: Arial, system-ui, sans-serif;
+        font-weight: 700;
+      }
+
+      .panel {
+        margin-top: 18px;
+        padding: 18px;
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 3px solid var(--line);
+        box-shadow: 0 12px 0 rgba(0, 0, 0, 0.25);
+      }
+
+      button {
+        min-height: 46px;
+        padding: 0 16px;
+        border: 2px solid var(--line);
+        background: var(--green);
+        color: #071006;
+        cursor: pointer;
+        font: 900 16px Arial, system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat {
+        min-height: 96px;
+        padding: 14px;
+        border: 2px solid var(--line);
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font: 800 13px Arial, system-ui, sans-serif;
+      }
+
+      .stat strong {
+        display: block;
+        margin-top: 12px;
+        color: var(--text);
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      .status.bad {
+        color: var(--red);
+      }
+
+      pre {
+        min-height: 180px;
+        max-height: 280px;
+        overflow: auto;
+        margin: 0;
+        padding: 14px;
+        background: #080a07;
+        border: 2px solid var(--line);
+        color: var(--text);
+        font: 700 13px Consolas, monospace;
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 760px) {
+        .stats {
+          grid-template-columns: 1fr;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WEBRTC LATENCY</h1>
+      <p>
+        Creates two local RTCPeerConnections, opens a data channel, and measures
+        round-trip time across that channel.
+      </p>
+
+      <section class="panel">
+        <button id="start">START TEST</button>
+        <button id="stop" disabled>STOP</button>
+      </section>
+
+      <section class="panel stats">
+        <div class="stat">
+          <span>STATUS</span>
+          <strong id="status">IDLE</strong>
+        </div>
+        <div class="stat">
+          <span>CONNECTION SETUP</span>
+          <strong id="setup">--</strong>
+        </div>
+        <div class="stat">
+          <span>DATA RTT</span>
+          <strong id="rtt">--</strong>
+        </div>
+        <div class="stat">
+          <span>ICE STATE</span>
+          <strong id="ice">--</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script>
+      const startButton = document.querySelector("#start");
+      const stopButton = document.querySelector("#stop");
+      const statusEl = document.querySelector("#status");
+      const setupEl = document.querySelector("#setup");
+      const rttEl = document.querySelector("#rtt");
+      const iceEl = document.querySelector("#ice");
+      const logEl = document.querySelector("#log");
+
+      let localPeer = null;
+      let remotePeer = null;
+      let channel = null;
+      let sampleTimer = 0;
+      let sequence = 0;
+      let setupStartedAt = 0;
+      let pending = new Map();
+      let samples = [];
+
+      function now() {
+        return performance.now();
+      }
+
+      function ms(value) {
+        if (!Number.isFinite(value)) {
+          return "--";
+        }
+        return `${Math.round(value)}ms`;
+      }
+
+      function average(values) {
+        if (values.length === 0) {
+          return NaN;
+        }
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+      }
+
+      function setStatus(text, bad = false) {
+        statusEl.textContent = text;
+        statusEl.classList.toggle("bad", bad);
+      }
+
+      function log(message) {
+        const time = new Date().toLocaleTimeString();
+        logEl.textContent = `[${time}] ${message}\n${logEl.textContent}`;
+      }
+
+      async function waitForIceGathering(peer) {
+        if (peer.iceGatheringState === "complete") {
+          return;
+        }
+        await new Promise((resolve) => {
+          const done = () => {
+            if (peer.iceGatheringState === "complete") {
+              peer.removeEventListener("icegatheringstatechange", done);
+              resolve();
+            }
+          };
+          peer.addEventListener("icegatheringstatechange", done);
+        });
+      }
+
+      async function negotiate() {
+        const offer = await localPeer.createOffer();
+        await localPeer.setLocalDescription(offer);
+        await waitForIceGathering(localPeer);
+
+        await remotePeer.setRemoteDescription(localPeer.localDescription);
+        const answer = await remotePeer.createAnswer();
+        await remotePeer.setLocalDescription(answer);
+        await waitForIceGathering(remotePeer);
+
+        await localPeer.setRemoteDescription(remotePeer.localDescription);
+      }
+
+      function sendSample() {
+        if (channel === null || channel.readyState !== "open") {
+          return;
+        }
+        sequence += 1;
+        pending.set(sequence, now());
+        channel.send(JSON.stringify({ type: "ping", sequence }));
+      }
+
+      async function start() {
+        stop();
+        setupEl.textContent = "--";
+        rttEl.textContent = "--";
+        iceEl.textContent = "--";
+        logEl.textContent = "";
+        sequence = 0;
+        pending = new Map();
+        samples = [];
+
+        if (!("RTCPeerConnection" in window)) {
+          setStatus("UNSUPPORTED", true);
+          log("This browser does not expose RTCPeerConnection.");
+          return;
+        }
+
+        setStatus("CONNECTING");
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        setupStartedAt = now();
+
+        localPeer = new RTCPeerConnection({ iceServers: [] });
+        remotePeer = new RTCPeerConnection({ iceServers: [] });
+
+        localPeer.addEventListener("icecandidate", (event) => {
+          if (event.candidate !== null) {
+            remotePeer.addIceCandidate(event.candidate).catch((error) => {
+              log(`Remote ICE candidate failed: ${error.message}`);
+            });
+          }
+        });
+        remotePeer.addEventListener("icecandidate", (event) => {
+          if (event.candidate !== null) {
+            localPeer.addIceCandidate(event.candidate).catch((error) => {
+              log(`Local ICE candidate failed: ${error.message}`);
+            });
+          }
+        });
+
+        localPeer.addEventListener("iceconnectionstatechange", () => {
+          iceEl.textContent = localPeer.iceConnectionState.toUpperCase();
+        });
+
+        remotePeer.addEventListener("datachannel", (event) => {
+          event.channel.addEventListener("message", (messageEvent) => {
+            event.channel.send(messageEvent.data);
+          });
+        });
+
+        channel = localPeer.createDataChannel("battlecity-latency", {
+          ordered: true,
+        });
+
+        channel.addEventListener("open", () => {
+          setupEl.textContent = ms(now() - setupStartedAt);
+          setStatus("RUNNING");
+          log("Data channel open. Sending samples every 250ms.");
+          sampleTimer = window.setInterval(sendSample, 250);
+          sendSample();
+        });
+
+        channel.addEventListener("message", (event) => {
+          let message;
+          try {
+            message = JSON.parse(String(event.data));
+          } catch {
+            return;
+          }
+          if (message.type !== "ping") {
+            return;
+          }
+          const sentAt = pending.get(message.sequence);
+          if (sentAt === undefined) {
+            return;
+          }
+          pending.delete(message.sequence);
+          samples.push(now() - sentAt);
+          rttEl.textContent = ms(average(samples.slice(-30)));
+        });
+
+        channel.addEventListener("close", () => {
+          log("Data channel closed.");
+        });
+
+        try {
+          await negotiate();
+          log("Offer/answer negotiation completed.");
+        } catch (error) {
+          setStatus("ERROR", true);
+          log(`Negotiation failed: ${error.message}`);
+          stop();
+        }
+      }
+
+      function stop() {
+        window.clearInterval(sampleTimer);
+        sampleTimer = 0;
+        if (channel !== null) {
+          channel.close();
+          channel = null;
+        }
+        if (localPeer !== null) {
+          localPeer.close();
+          localPeer = null;
+        }
+        if (remotePeer !== null) {
+          remotePeer.close();
+          remotePeer = null;
+        }
+        startButton.disabled = false;
+        stopButton.disabled = true;
+      }
+
+      startButton.addEventListener("click", start);
+      stopButton.addEventListener("click", () => {
+        stop();
+        setStatus("IDLE");
+        log("Stopped by user.");
+      });
+    </script>
+  </body>
+</html>

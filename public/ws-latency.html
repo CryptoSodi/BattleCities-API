@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Battle City WebSocket Latency Test</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #11140f;
+        --panel: #1c2117;
+        --panel-2: #252b1d;
+        --line: #5d6735;
+        --text: #f4f1d2;
+        --muted: #b7b37e;
+        --green: #7ec850;
+        --yellow: #f0c94d;
+        --red: #e25b43;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(circle at 50% 0, #202819 0, var(--bg) 54%);
+        color: var(--text);
+        font-family:
+          "Arial Black",
+          Impact,
+          system-ui,
+          sans-serif;
+        letter-spacing: 0;
+      }
+
+      main {
+        width: min(960px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 28px 0;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(30px, 6vw, 54px);
+        line-height: 1;
+        color: var(--yellow);
+      }
+
+      p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-family: Arial, system-ui, sans-serif;
+        font-weight: 700;
+      }
+
+      .panel {
+        margin-top: 18px;
+        padding: 18px;
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 3px solid var(--line);
+        box-shadow: 0 12px 0 rgba(0, 0, 0, 0.25);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--yellow);
+        font-size: 15px;
+      }
+
+      input,
+      button {
+        min-height: 46px;
+        border: 2px solid var(--line);
+        font: 900 16px Arial, system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+
+      input {
+        width: 100%;
+        padding: 0 12px;
+        background: #090b08;
+        color: var(--text);
+      }
+
+      button {
+        padding: 0 16px;
+        background: var(--green);
+        color: #071006;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 12px;
+        align-items: end;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat {
+        min-height: 96px;
+        padding: 14px;
+        border: 2px solid var(--line);
+        background: rgba(0, 0, 0, 0.22);
+      }
+
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font: 800 13px Arial, system-ui, sans-serif;
+      }
+
+      .stat strong {
+        display: block;
+        margin-top: 12px;
+        color: var(--text);
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      .status {
+        color: var(--yellow);
+      }
+
+      .status.bad {
+        color: var(--red);
+      }
+
+      pre {
+        min-height: 180px;
+        max-height: 280px;
+        overflow: auto;
+        margin: 0;
+        padding: 14px;
+        background: #080a07;
+        border: 2px solid var(--line);
+        color: var(--text);
+        font: 700 13px Consolas, monospace;
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 760px) {
+        .row,
+        .stats {
+          grid-template-columns: 1fr;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WEBSOCKET LATENCY</h1>
+      <p>
+        Tests a Battle City WebSocket endpoint with ping/pong round trips.
+        Production defaults to <code>/ws-latency</code> on the API server.
+      </p>
+
+      <section class="panel">
+        <div class="row">
+          <div>
+            <label for="endpoint">ENDPOINT</label>
+            <input id="endpoint" autocomplete="off" />
+          </div>
+          <button id="start">START TEST</button>
+          <button id="stop" disabled>STOP</button>
+        </div>
+      </section>
+
+      <section class="panel stats">
+        <div class="stat">
+          <span>STATUS</span>
+          <strong id="status">IDLE</strong>
+        </div>
+        <div class="stat">
+          <span>OPEN TIME</span>
+          <strong id="open-time">--</strong>
+        </div>
+        <div class="stat">
+          <span>PING RTT</span>
+          <strong id="rtt">--</strong>
+        </div>
+        <div class="stat">
+          <span>SNAPSHOT GAP</span>
+          <strong id="gap">--</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script>
+      const endpointInput = document.querySelector("#endpoint");
+      const startButton = document.querySelector("#start");
+      const stopButton = document.querySelector("#stop");
+      const statusEl = document.querySelector("#status");
+      const openTimeEl = document.querySelector("#open-time");
+      const rttEl = document.querySelector("#rtt");
+      const gapEl = document.querySelector("#gap");
+      const logEl = document.querySelector("#log");
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      endpointInput.value = `${protocol}//${window.location.host}/ws-latency`;
+
+      let socket = null;
+      let sequence = 0;
+      let testTimer = 0;
+      let connectStartedAt = 0;
+      let lastMessageAt = 0;
+      let pendingPings = new Map();
+      let rttSamples = [];
+      let gapSamples = [];
+
+      function now() {
+        return performance.now();
+      }
+
+      function ms(value) {
+        if (!Number.isFinite(value)) {
+          return "--";
+        }
+        return `${Math.round(value)}ms`;
+      }
+
+      function average(values) {
+        if (values.length === 0) {
+          return NaN;
+        }
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+      }
+
+      function setStatus(text, bad = false) {
+        statusEl.textContent = text;
+        statusEl.classList.toggle("bad", bad);
+      }
+
+      function log(message) {
+        const time = new Date().toLocaleTimeString();
+        logEl.textContent = `[${time}] ${message}\n${logEl.textContent}`;
+      }
+
+      function sendPing() {
+        if (socket === null || socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        sequence += 1;
+        pendingPings.set(sequence, now());
+        socket.send(
+          JSON.stringify({
+            type: "ping",
+            sequence,
+            sentAt: Date.now(),
+          }),
+        );
+      }
+
+      function refreshStats() {
+        rttEl.textContent = ms(average(rttSamples.slice(-30)));
+        gapEl.textContent = ms(average(gapSamples.slice(-30)));
+      }
+
+      function start() {
+        stop();
+        logEl.textContent = "";
+        openTimeEl.textContent = "--";
+        rttEl.textContent = "--";
+        gapEl.textContent = "--";
+        sequence = 0;
+        lastMessageAt = 0;
+        pendingPings = new Map();
+        rttSamples = [];
+        gapSamples = [];
+
+        const endpoint = endpointInput.value.trim();
+        setStatus("CONNECTING");
+        log(`Connecting to ${endpoint}`);
+        connectStartedAt = now();
+        socket = new WebSocket(endpoint);
+
+        socket.addEventListener("open", () => {
+          openTimeEl.textContent = ms(now() - connectStartedAt);
+          setStatus("RUNNING");
+          log("Socket open. Sending ping samples every 250ms.");
+          testTimer = window.setInterval(sendPing, 250);
+          sendPing();
+        });
+
+        socket.addEventListener("message", (event) => {
+          let message;
+          try {
+            message = JSON.parse(String(event.data));
+          } catch {
+            log(`Non-JSON message: ${String(event.data).slice(0, 120)}`);
+            return;
+          }
+
+          if (message.type === "pong") {
+            const receivedAt = now();
+            if (lastMessageAt !== 0) {
+              gapSamples.push(receivedAt - lastMessageAt);
+            }
+            lastMessageAt = receivedAt;
+            const sentAt = pendingPings.get(message.sequence);
+            if (sentAt !== undefined) {
+              pendingPings.delete(message.sequence);
+              rttSamples.push(receivedAt - sentAt);
+            }
+            refreshStats();
+          }
+
+          if (message.type === "error") {
+            setStatus("ERROR", true);
+            log(`Server error: ${message.message || "unknown"}`);
+          }
+        });
+
+        socket.addEventListener("close", (event) => {
+          window.clearInterval(testTimer);
+          stopButton.disabled = true;
+          startButton.disabled = false;
+          if (statusEl.textContent !== "IDLE") {
+            setStatus("CLOSED", event.code !== 1000);
+          }
+          log(`Socket closed: ${event.code} ${event.reason || ""}`.trim());
+        });
+
+        socket.addEventListener("error", () => {
+          setStatus("ERROR", true);
+          log("WebSocket error. Confirm the Rust local server is running.");
+        });
+
+        startButton.disabled = true;
+        stopButton.disabled = false;
+      }
+
+      function stop() {
+        window.clearInterval(testTimer);
+        testTimer = 0;
+        if (socket !== null) {
+          socket.close(1000, "test stopped");
+          socket = null;
+        }
+        startButton.disabled = false;
+        stopButton.disabled = true;
+      }
+
+      startButton.addEventListener("click", start);
+      stopButton.addEventListener("click", () => {
+        stop();
+        setStatus("IDLE");
+        log("Stopped by user.");
+      });
+    </script>
+  </body>
+</html>
