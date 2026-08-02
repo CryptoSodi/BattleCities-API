@@ -26,7 +26,7 @@ function isConfigured() {
   );
 }
 
-function createAuthorizationUrl(origin) {
+function createAuthorizationUrl(origin, returnTo = '/') {
   const config = requireConfig();
   const redirectUri = createRedirectUri(origin);
   const params = new URLSearchParams({
@@ -37,7 +37,10 @@ function createAuthorizationUrl(origin) {
     access_type: 'online',
     include_granted_scopes: 'true',
     prompt: 'select_account',
-    state: createState({ redirectUri }),
+    state: createState({
+      redirectUri,
+      returnTo: normalizeFrontendPath(returnTo),
+    }),
   });
 
   return `${AUTH_URL}?${params.toString()}`;
@@ -55,6 +58,7 @@ async function completeLogin({ code, state }) {
   return {
     profile,
     redirectUri: statePayload.redirectUri,
+    returnTo: normalizeFrontendPath(statePayload.returnTo),
   };
 }
 
@@ -210,6 +214,14 @@ function createFrontendRedirect(pathname) {
   return new URL(pathname, `${baseUrl.replace(/\/+$/, '')}/`).toString();
 }
 
+function normalizeFrontendPath(value) {
+  if (typeof value !== 'string') {
+    return '/';
+  }
+  const trimmed = value.trim();
+  return trimmed === '/admin' || trimmed === '/admin/' ? '/admin/' : '/';
+}
+
 function requireConfig() {
   const config = getConfig();
   if (!isConfigured()) {
@@ -246,5 +258,6 @@ module.exports = {
   getOriginFromExpressRequest,
   getOriginFromRequestUrl,
   isConfigured,
+  normalizeFrontendPath,
   redirectResponse,
 };

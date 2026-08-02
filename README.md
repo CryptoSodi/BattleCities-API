@@ -188,6 +188,16 @@ POST /api/events/:eventId/enter
 POST /api/events/:eventId/start
 GET  /api/events/:eventId/leaderboard
 POST /api/events/:eventId/prizes/approve
+
+GET   /api/admin/session
+GET   /api/admin/overview
+GET   /api/admin/matches
+GET   /api/admin/players
+GET   /api/admin/tournaments
+POST  /api/admin/tournaments
+PATCH /api/admin/tournaments/:id
+GET   /api/admin/tournaments/:id/leaderboard
+POST  /api/admin/tournaments/:id/prizes/distribute
 ```
 
 Normal waiting-room exits refund the fuel charged for that match. Event entry
@@ -200,7 +210,8 @@ transfer funds automatically.
 The headless broadcaster records every authoritative host frame in contiguous,
 idempotent PostgreSQL batches. Archive metadata includes both players, game
 type, level, seed, simulation configuration, final result, and score details.
-Apply migration `005_match_archives` before running the updated broadcaster:
+Apply all migrations, including `009_admin_tournaments`, before running the
+updated API:
 
 ```powershell
 npm --prefix api-server run db:migrate

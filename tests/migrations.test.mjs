@@ -96,6 +96,21 @@ test('match archive migration persists metadata and ordered frame batches', asyn
   assert.match(sql, /jsonb_array_length\(frames_json\) = frame_count/);
 });
 
+test('admin tournament migration supports audited idempotent prize payouts', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/009_admin_tournaments.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_tournaments\b/);
+  assert.match(
+    sql,
+    /CREATE TABLE IF NOT EXISTS battlecity_tournament_prize_distributions\b/,
+  );
+  assert.match(sql, /UNIQUE \(tournament_id, player_id\)/);
+  assert.match(sql, /prizes_distributed_at TIMESTAMPTZ NULL/);
+  assert.match(sql, /CHECK \(prize_pool >= 0\)/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

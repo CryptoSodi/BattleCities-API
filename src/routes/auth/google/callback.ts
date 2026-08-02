@@ -21,7 +21,7 @@ export async function GET(request: Request): Promise<Response> {
     return new Response(null, {
       status: 302,
       headers: {
-        location: googleAuth.createFrontendRedirect('/'),
+        location: googleAuth.createFrontendRedirect(login.returnTo),
         'set-cookie': sessionIdentity.createSessionCookie(session.id),
       },
     });

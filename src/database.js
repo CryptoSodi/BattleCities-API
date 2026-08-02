@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '008_discord_verification';
+const REQUIRED_MIGRATION = '009_admin_tournaments';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

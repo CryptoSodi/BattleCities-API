@@ -13,6 +13,7 @@ import {
 import { createPlayerRuntime } from './_runtime';
 
 const eventStore = require('../../stores/eventStore');
+const tournamentStore = require('../../stores/tournamentStore');
 const multiplayerStore = require('../../stores/multiplayerStore');
 const broadcasterService = require('../../services/broadcasterService');
 
@@ -25,7 +26,7 @@ export async function GET(
   eventId: string,
   action: string,
 ): Promise<Response> {
-  const event = findEvent(eventId);
+  const event = await findEvent(eventId);
   if (event === null) {
     return createJsonResponse(request, { error: 'Event not found' }, 404);
   }
@@ -45,7 +46,7 @@ export async function POST(
   eventId: string,
   action: string,
 ): Promise<Response> {
-  const event = findEvent(eventId);
+  const event = await findEvent(eventId);
   if (event === null) {
     return createJsonResponse(request, { ok: false, error: 'Event not found' }, 404);
   }
@@ -80,7 +81,10 @@ export async function POST(
       if (assignment.match.status === 'waiting') {
         return createJsonResponse(request, { ok: true, assignment }, 201);
       }
-      await broadcasterService.ensureMatchStarted(assignment.match.id, 1);
+      await broadcasterService.ensureMatchStarted(
+        assignment.match.id,
+        Math.max(1, Number(event.levelNumber) || 1),
+      );
       return createJsonResponse(
         request,
         { ok: true, assignment, runtime: createPlayerRuntime(request, assignment) },
@@ -141,10 +145,11 @@ async function approvePrizes(request: Request, event: any): Promise<Response> {
   }
 }
 
-function findEvent(value: string): any {
-  return (
+async function findEvent(value: string): Promise<any> {
+  const builtIn = (
     eventStore
       .listEvents()
       .find((event: any) => event.id === value || event.slug === value) || null
   );
+  return builtIn || tournamentStore.findPublicEvent(value);
 }

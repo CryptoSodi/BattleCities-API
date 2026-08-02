@@ -3,6 +3,11 @@ import * as airdropEligibility from '../routes/airdrops/eligibility';
 import * as googleAuthCallback from '../routes/auth/google/callback';
 import * as googleAuthNative from '../routes/auth/google/native';
 import * as googleAuthStart from '../routes/auth/google/start';
+import * as adminMatches from '../routes/admin/matches';
+import * as adminOverview from '../routes/admin/overview';
+import * as adminPlayers from '../routes/admin/players';
+import * as adminSession from '../routes/admin/session';
+import * as adminTournaments from '../routes/admin/tournaments';
 import * as boostStatus from '../routes/boost/status';
 import * as economyAccount from '../routes/economy/account';
 import * as economyLedger from '../routes/economy/ledger';
@@ -46,6 +51,15 @@ import { createJsonResponse, createOptionsResponse } from '../routes/_helpers';
 type RouteHandler = (request: Request) => Response | Promise<Response>;
 
 const routes: { [path: string]: { [method: string]: RouteHandler } } = {
+  'admin/matches': adminMatches,
+  'admin/overview': adminOverview,
+  'admin/players': adminPlayers,
+  'admin/session': adminSession,
+  'admin/tournaments': {
+    GET: adminTournaments.GET,
+    POST: adminTournaments.POST,
+    OPTIONS: adminTournaments.OPTIONS,
+  },
   'airdrops/claim': airdropClaim,
   'airdrops/eligibility': airdropEligibility,
   'auth/google/callback': googleAuthCallback,
@@ -92,6 +106,7 @@ const multiplayerArchiveRoutePattern = /^multiplayer\/archives(?:\/([^/]+))?(?:\
 const multiplayerEventRoutePattern = /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
 const playerProfileRoutePattern = /^players\/([^/]+)\/profile$/;
 const discordVerifiedUserRoutePattern = /^integrations\/discord\/verified-users\/([^/]+)$/;
+const adminTournamentRoutePattern = /^admin\/tournaments\/([^/]+)(?:\/(leaderboard|prizes\/distribute))?$/;
 
 function resolveRoute(request: Request): string {
   const url = new URL(request.url);
@@ -106,6 +121,24 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  const adminTournamentMatch = route.match(adminTournamentRoutePattern);
+  if (adminTournamentMatch !== null) {
+    const [, tournamentId, action = null] = adminTournamentMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'GET') {
+      return adminTournaments.GET(request, tournamentId, action);
+    }
+    if (method === 'PATCH' && action === null) {
+      return adminTournaments.PATCH(request, tournamentId);
+    }
+    if (method === 'POST' && action === 'prizes/distribute') {
+      return adminTournaments.POST(request, tournamentId, action);
+    }
+    if (method === 'OPTIONS') {
+      return adminTournaments.OPTIONS(request);
+    }
+    return methodNotAllowed('GET, PATCH, POST, OPTIONS');
+  }
   const discordVerifiedUserMatch = route.match(discordVerifiedUserRoutePattern);
   if (discordVerifiedUserMatch !== null) {
     const [, discordUserId] = discordVerifiedUserMatch;
