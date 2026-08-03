@@ -221,32 +221,42 @@
         logEl.textContent = `[${time}] ${message}\n${logEl.textContent}`;
       }
 
-      async function waitForIceGathering(peer) {
-        if (peer.iceGatheringState === "complete") {
-          return;
-        }
-        await new Promise((resolve) => {
-          const done = () => {
-            if (peer.iceGatheringState === "complete") {
-              peer.removeEventListener("icegatheringstatechange", done);
-              resolve();
+      function bridgeIceCandidates(source, target, label) {
+        const queue = [];
+        const flush = async () => {
+          if (target.remoteDescription === null) {
+            return;
+          }
+          while (queue.length > 0) {
+            const candidate = queue.shift();
+            try {
+              await target.addIceCandidate(candidate);
+            } catch (error) {
+              log(`${label} ICE candidate failed: ${error.message}`);
             }
-          };
-          peer.addEventListener("icegatheringstatechange", done);
+          }
+        };
+        source.addEventListener("icecandidate", (event) => {
+          if (event.candidate === null) {
+            return;
+          }
+          queue.push(event.candidate);
+          void flush();
         });
+        return flush;
       }
 
-      async function negotiate() {
+      async function negotiate(flushRemoteCandidates, flushLocalCandidates) {
         const offer = await localPeer.createOffer();
         await localPeer.setLocalDescription(offer);
-        await waitForIceGathering(localPeer);
 
         await remotePeer.setRemoteDescription(localPeer.localDescription);
+        await flushRemoteCandidates();
         const answer = await remotePeer.createAnswer();
         await remotePeer.setLocalDescription(answer);
-        await waitForIceGathering(remotePeer);
 
         await localPeer.setRemoteDescription(remotePeer.localDescription);
+        await flushLocalCandidates();
       }
 
       function sendSample() {
@@ -281,6 +291,16 @@
 
         localPeer = new RTCPeerConnection({ iceServers: [] });
         remotePeer = new RTCPeerConnection({ iceServers: [] });
+        const flushRemoteCandidates = bridgeIceCandidates(
+          localPeer,
+          remotePeer,
+          "Remote",
+        );
+        const flushLocalCandidates = bridgeIceCandidates(
+          remotePeer,
+          localPeer,
+          "Local",
+        );
 
         localPeer.addEventListener("iceconnectionstatechange", () => {
           iceEl.textContent = localPeer.iceConnectionState.toUpperCase();
@@ -328,8 +348,14 @@
         });
 
         try {
-          await negotiate();
+          await negotiate(flushRemoteCandidates, flushLocalCandidates);
           log("Offer/answer negotiation completed.");
+          window.setTimeout(() => {
+            if (channel !== null && channel.readyState !== "open") {
+              setStatus("TIMEOUT", true);
+              log("Data channel did not open within 5 seconds.");
+            }
+          }, 5000);
         } catch (error) {
           setStatus("ERROR", true);
           log(`Negotiation failed: ${error.message}`);
