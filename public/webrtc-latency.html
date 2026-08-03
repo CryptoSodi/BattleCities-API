@@ -282,21 +282,6 @@
         localPeer = new RTCPeerConnection({ iceServers: [] });
         remotePeer = new RTCPeerConnection({ iceServers: [] });
 
-        localPeer.addEventListener("icecandidate", (event) => {
-          if (event.candidate !== null) {
-            remotePeer.addIceCandidate(event.candidate).catch((error) => {
-              log(`Remote ICE candidate failed: ${error.message}`);
-            });
-          }
-        });
-        remotePeer.addEventListener("icecandidate", (event) => {
-          if (event.candidate !== null) {
-            localPeer.addIceCandidate(event.candidate).catch((error) => {
-              log(`Local ICE candidate failed: ${error.message}`);
-            });
-          }
-        });
-
         localPeer.addEventListener("iceconnectionstatechange", () => {
           iceEl.textContent = localPeer.iceConnectionState.toUpperCase();
         });
