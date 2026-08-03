@@ -174,7 +174,7 @@
       <h1>WEBSOCKET LATENCY</h1>
       <p>
         Tests a Battle City WebSocket endpoint with ping/pong round trips.
-        Production defaults to <code>/ws-latency</code> on the API server.
+        Production defaults to the active host's latency endpoint.
       </p>
 
       <section class="panel">
@@ -223,7 +223,10 @@
       const logEl = document.querySelector("#log");
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      endpointInput.value = `${protocol}//${window.location.host}/ws-latency`;
+      const endpointPath = window.location.hostname.endsWith(".vercel.app")
+        ? "/api/ws-latency"
+        : "/ws-latency";
+      endpointInput.value = `${protocol}//${window.location.host}${endpointPath}`;
 
       let socket = null;
       let sequence = 0;

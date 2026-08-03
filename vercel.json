@@ -8,6 +8,9 @@
   "functions": {
     "api/router.ts": {
       "maxDuration": 60
+    },
+    "api/ws-latency.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
