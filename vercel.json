@@ -4,13 +4,14 @@
   "buildCommand": "npm run deploy:migrate",
   "outputDirectory": "public",
   "fluid": true,
-  "regions": ["iad1"],
+  "regions": ["bom1"],
   "functions": {
     "api/router.ts": {
       "maxDuration": 60
     },
     "api/ws-latency.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "regions": ["bom1"]
     }
   },
   "rewrites": [
