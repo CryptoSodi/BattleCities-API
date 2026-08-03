@@ -210,11 +210,36 @@ function createLatencyPong(payload: any): any {
         : null,
       clientSentAt: message.sentAt ?? null,
       serverReceivedAt: Date.now(),
+      serverRegion: getServerRegion(),
+      configuredRegions: getConfiguredRegions(),
     };
   } catch {
-    body = { type: 'pong', serverReceivedAt: Date.now() };
+    body = {
+      type: 'pong',
+      serverReceivedAt: Date.now(),
+      serverRegion: getServerRegion(),
+      configuredRegions: getConfiguredRegions(),
+    };
   }
   return createWebSocketFrame(Buffer.from(JSON.stringify(body)), 0x1);
+}
+
+function getServerRegion(): string {
+  const region = String(
+    process.env.BATTLECITY_API_REGION ||
+      process.env.BATTLECITY_REGION ||
+      process.env.VERCEL_REGION ||
+      '',
+  ).trim();
+  return region === '' ? 'native' : region;
+}
+
+function getConfiguredRegions(): string[] {
+  const regions = String(process.env.BATTLECITY_CONFIGURED_REGIONS || '')
+    .split(',')
+    .map((region: string) => region.trim())
+    .filter((region: string) => region !== '');
+  return regions.length === 0 ? [getServerRegion()] : regions;
 }
 
 function createWebSocketFrame(payload: any, opcode = 0x1): any {

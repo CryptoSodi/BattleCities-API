@@ -2,6 +2,9 @@ import { createHash } from 'crypto';
 import { createServer } from 'http';
 
 declare const Buffer: any;
+declare const process: any;
+
+const CONFIGURED_REGIONS = ['bom1'];
 
 const server = createServer((_request, response) => {
   response.statusCode = 426;
@@ -111,11 +114,28 @@ function createLatencyPong(payload: any): any {
         : null,
       clientSentAt: message.sentAt ?? null,
       serverReceivedAt: Date.now(),
+      serverRegion: getServerRegion(),
+      configuredRegions: CONFIGURED_REGIONS,
     };
   } catch {
-    body = { type: 'pong', serverReceivedAt: Date.now() };
+    body = {
+      type: 'pong',
+      serverReceivedAt: Date.now(),
+      serverRegion: getServerRegion(),
+      configuredRegions: CONFIGURED_REGIONS,
+    };
   }
   return createWebSocketFrame(Buffer.from(JSON.stringify(body)), 0x1);
+}
+
+function getServerRegion(): string {
+  const region = String(
+    process.env.VERCEL_REGION ||
+      process.env.BATTLECITY_API_REGION ||
+      process.env.BATTLECITY_REGION ||
+      '',
+  ).trim();
+  return region === '' ? 'unknown' : region;
 }
 
 function createWebSocketFrame(payload: any, opcode = 0x1): any {

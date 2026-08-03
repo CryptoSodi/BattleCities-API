@@ -111,7 +111,7 @@
 
       .stats {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 12px;
       }
 
@@ -134,6 +134,7 @@
         color: var(--text);
         font-size: 28px;
         line-height: 1;
+        overflow-wrap: anywhere;
       }
 
       .status {
@@ -205,6 +206,10 @@
           <span>SNAPSHOT GAP</span>
           <strong id="gap">--</strong>
         </div>
+        <div class="stat">
+          <span>SERVER REGION</span>
+          <strong id="region">--</strong>
+        </div>
       </section>
 
       <section class="panel">
@@ -220,6 +225,7 @@
       const openTimeEl = document.querySelector("#open-time");
       const rttEl = document.querySelector("#rtt");
       const gapEl = document.querySelector("#gap");
+      const regionEl = document.querySelector("#region");
       const logEl = document.querySelector("#log");
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -291,6 +297,7 @@
         openTimeEl.textContent = "--";
         rttEl.textContent = "--";
         gapEl.textContent = "--";
+        regionEl.textContent = "--";
         sequence = 0;
         lastMessageAt = 0;
         pendingPings = new Map();
@@ -322,6 +329,7 @@
 
           if (message.type === "pong") {
             const receivedAt = now();
+            updateServerRegion(message);
             if (lastMessageAt !== 0) {
               gapSamples.push(receivedAt - lastMessageAt);
             }
@@ -368,6 +376,27 @@
         }
         startButton.disabled = false;
         stopButton.disabled = true;
+      }
+
+      function updateServerRegion(message) {
+        const serverRegion =
+          typeof message.serverRegion === "string" &&
+          message.serverRegion.trim() !== ""
+            ? message.serverRegion.trim()
+            : "unknown";
+        const previousRegion = regionEl.textContent;
+        const displayRegion = serverRegion.toUpperCase();
+        regionEl.textContent = displayRegion;
+        if (previousRegion !== displayRegion) {
+          const configuredRegions = Array.isArray(message.configuredRegions)
+            ? message.configuredRegions.join(", ")
+            : "";
+          log(
+            configuredRegions === ""
+              ? `Server runtime region: ${serverRegion}`
+              : `Server runtime region: ${serverRegion}; configured: ${configuredRegions}`,
+          );
+        }
       }
 
       startButton.addEventListener("click", start);
