@@ -15,7 +15,7 @@
   },
   "rewrites": [
     {
-      "source": "/api/((?!router$).*)",
+      "source": "/api/((?!(router|ws-latency)$).*)",
       "destination": "/api/router?__route=$1"
     }
   ]
