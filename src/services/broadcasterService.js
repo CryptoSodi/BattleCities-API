@@ -21,7 +21,13 @@ const POWERUP_TYPES = {
 };
 
 function getConfig() {
-  const baseUrl = String(process.env.BROADCASTER_BASE_URL || '')
+  const websocketMode = String(process.env.MULTIPLAYER_TRANSPORT || '')
+    .toLowerCase() === 'websocket';
+  const baseUrl = String(
+    websocketMode
+      ? process.env.WEBSOCKET_BROADCASTER_BASE_URL || process.env.WEBSOCKET_BASE_URL || ''
+      : process.env.BROADCASTER_BASE_URL || '',
+  )
     .trim()
     .replace(/\/+$/, '');
   const token = String(process.env.BROADCASTER_SERVICE_TOKEN || '').trim();

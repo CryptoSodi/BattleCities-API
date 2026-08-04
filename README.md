@@ -57,7 +57,7 @@ https://api.battlecities.com/api/health
 https://api.battlecities.com/api/ready
 ```
 
-The frontend Vercel project only needs
+The frontend Cloudflare Pages project only needs
 `BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
 
 The combined multiplayer values are:
