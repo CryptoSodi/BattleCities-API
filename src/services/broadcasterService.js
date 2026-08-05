@@ -21,10 +21,17 @@ const POWERUP_TYPES = {
 };
 
 function getConfig() {
-  const websocketMode = String(process.env.MULTIPLAYER_TRANSPORT || '')
-    .toLowerCase() === 'websocket';
+  const transport = String(process.env.MULTIPLAYER_TRANSPORT || '')
+    .trim()
+    .toLowerCase();
+  const websocketMode = transport === 'websocket';
+  const vercelWebsocketMode = transport === 'vercel-websocket';
   const baseUrl = String(
-    websocketMode
+    vercelWebsocketMode
+      ? process.env.VERCEL_WEBSOCKET_BROADCASTER_BASE_URL ||
+        process.env.VERCEL_WEBSOCKET_BASE_URL ||
+        ''
+      : websocketMode
       ? process.env.WEBSOCKET_BROADCASTER_BASE_URL || process.env.WEBSOCKET_BASE_URL || ''
       : process.env.BROADCASTER_BASE_URL || '',
   )

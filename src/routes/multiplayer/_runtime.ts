@@ -12,8 +12,15 @@ export function createPlayerRuntime(
   const player = assignment.match.players.find(
     (candidate) => candidate.slot === assignment.playerSlot,
   );
-  if (String(process.env.MULTIPLAYER_TRANSPORT || '').toLowerCase() === 'websocket') {
-    const baseUrl = String(process.env.WEBSOCKET_BASE_URL || '').replace(/\/+$/, '');
+  const transport = String(process.env.MULTIPLAYER_TRANSPORT || '')
+    .trim()
+    .toLowerCase();
+  if (transport === 'websocket' || transport === 'vercel-websocket') {
+    const baseUrl = String(
+      transport === 'vercel-websocket'
+        ? process.env.VERCEL_WEBSOCKET_BASE_URL || ''
+        : process.env.WEBSOCKET_BASE_URL || '',
+    ).replace(/\/+$/, '');
     const secret = String(process.env.WEBSOCKET_TICKET_SECRET || '');
     if (!/^https:\/\//.test(baseUrl) || secret.length < 32) {
       throw new Error('WebSocket multiplayer transport is not configured');
@@ -24,8 +31,7 @@ export function createPlayerRuntime(
       secret,
     );
     const websocketUrl = new URL(
-      `/matches/${encodeURIComponent(assignment.match.id)}/players/${assignment.playerSlot}`,
-      baseUrl,
+      `${baseUrl}/matches/${encodeURIComponent(assignment.match.id)}/players/${assignment.playerSlot}`,
     );
     websocketUrl.protocol = 'wss:';
     websocketUrl.searchParams.set('ticket', ticket);
