@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '009_admin_tournaments';
+const REQUIRED_MIGRATION = '010_headless_target';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

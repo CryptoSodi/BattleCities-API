@@ -111,6 +111,15 @@ test('admin tournament migration supports audited idempotent prize payouts', asy
   assert.match(sql, /CHECK \(prize_pool >= 0\)/);
 });
 
+test('headless target migration constrains persisted runtime selection', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/010_headless_target.sql'),
+    'utf8',
+  );
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS headless_target TEXT NULL/);
+  assert.match(sql, /'worker', 'bom1', 'usa'/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

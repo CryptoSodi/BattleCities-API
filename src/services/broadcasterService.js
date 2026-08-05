@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const economyStore = require('../stores/economyStore');
 const multiplayerStore = require('../stores/multiplayerStore');
+const headlessTarget = require('./headlessTarget');
 
 const ACTIVE_LOADOUT_SLOTS = [
   'active-one',
@@ -20,23 +21,11 @@ const POWERUP_TYPES = {
   'extra-life': 'life',
 };
 
-function getConfig() {
-  const transport = String(process.env.MULTIPLAYER_TRANSPORT || '')
-    .trim()
-    .toLowerCase();
-  const websocketMode = transport === 'websocket';
-  const vercelWebsocketMode = transport === 'vercel-websocket';
-  const baseUrl = String(
-    vercelWebsocketMode
-      ? process.env.VERCEL_WEBSOCKET_BROADCASTER_BASE_URL ||
-        process.env.VERCEL_WEBSOCKET_BASE_URL ||
-        ''
-      : websocketMode
-      ? process.env.WEBSOCKET_BROADCASTER_BASE_URL || process.env.WEBSOCKET_BASE_URL || ''
-      : process.env.BROADCASTER_BASE_URL || '',
-  )
-    .trim()
-    .replace(/\/+$/, '');
+async function getConfig(matchId) {
+  const match = await multiplayerStore.getMatch(matchId);
+  const target = headlessTarget.normalizeHeadlessTarget(match?.headlessTarget) ||
+    headlessTarget.getDefaultHeadlessTarget();
+  const baseUrl = headlessTarget.getBroadcasterBaseUrl(target);
   const token = String(process.env.BROADCASTER_SERVICE_TOKEN || '').trim();
   if (baseUrl === '' || token === '') {
     const error = new Error('Broadcaster service is not configured');
@@ -53,7 +42,7 @@ function isAuthorizedRequest(request) {
 }
 
 async function ensureMatchStarted(matchId, level) {
-  const config = getConfig();
+  const config = await getConfig(matchId);
   const existing = await multiplayerStore.getBroadcasterState(matchId);
   if (existing?.status === 'running') {
     const running = await probeMatch(config, matchId);
@@ -163,7 +152,7 @@ async function configureStagePlayer(
   playerSlot,
   replaceConnection = false,
 ) {
-  const config = getConfig();
+  const config = await getConfig(matchId);
   const options = await getMatchRuntimeOptions(matchId);
   const tier = options.initialPlayerTiers[playerSlot] || 'a';
   const runConsumables = options.playerRunConsumables[playerSlot] || {
@@ -241,7 +230,7 @@ async function stopMatch(matchId) {
     return existing;
   }
 
-  const config = getConfig();
+  const config = await getConfig(matchId);
   let response;
   try {
     response = await fetch(

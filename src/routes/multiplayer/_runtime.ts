@@ -4,6 +4,8 @@ import type {
 } from '../../../../shared/src';
 import { createHmac, randomBytes } from 'crypto';
 
+const headlessTarget = require('../../services/headlessTarget');
+
 export function createPlayerRuntime(
   request: Request,
   assignment: MultiplayerAssignment,
@@ -12,15 +14,11 @@ export function createPlayerRuntime(
   const player = assignment.match.players.find(
     (candidate) => candidate.slot === assignment.playerSlot,
   );
-  const transport = String(process.env.MULTIPLAYER_TRANSPORT || '')
-    .trim()
-    .toLowerCase();
-  if (transport === 'websocket' || transport === 'vercel-websocket') {
-    const baseUrl = String(
-      transport === 'vercel-websocket'
-        ? process.env.VERCEL_WEBSOCKET_BASE_URL || ''
-        : process.env.WEBSOCKET_BASE_URL || '',
-    ).replace(/\/+$/, '');
+  const target = headlessTarget.normalizeHeadlessTarget(
+    assignment.match.headlessTarget,
+  ) || headlessTarget.getDefaultHeadlessTarget();
+  if (headlessTarget.getHeadlessTransport(target) === 'websocket') {
+    const baseUrl = headlessTarget.getWebSocketBaseUrl(target);
     const secret = String(process.env.WEBSOCKET_TICKET_SECRET || '');
     if (!/^https:\/\//.test(baseUrl) || secret.length < 32) {
       throw new Error('WebSocket multiplayer transport is not configured');

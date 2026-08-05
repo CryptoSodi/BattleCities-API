@@ -16,6 +16,7 @@ const eventStore = require('../../stores/eventStore');
 const tournamentStore = require('../../stores/tournamentStore');
 const multiplayerStore = require('../../stores/multiplayerStore');
 const broadcasterService = require('../../services/broadcasterService');
+const headlessTarget = require('../../services/headlessTarget');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -77,6 +78,7 @@ export async function POST(
         player,
         event,
         fuelCost,
+        headlessTarget.resolveRequestHeadlessTarget(request),
       );
       if (assignment.match.status === 'waiting') {
         return createJsonResponse(request, { ok: true, assignment }, 201);

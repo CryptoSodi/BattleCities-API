@@ -42,6 +42,7 @@ async function startDirectMatch(
   tankTier = 'a',
   stage = 1,
   preferredMatchId = null,
+  requestedHeadlessTarget = null,
 ) {
   return withSerializedMatchmaking('direct', async () => {
     const abandonedMatchIds = stage === 1
@@ -57,6 +58,7 @@ async function startDirectMatch(
       tankTier,
       stage,
       preferredMatchId,
+      requestedHeadlessTarget,
     );
     return { ...assignment, abandonedMatchIds };
   });
@@ -73,9 +75,20 @@ async function enterEvent(player, event, fuelCost) {
   });
 }
 
-async function startEventMatch(player, event, fuelCost) {
+async function startEventMatch(player, event, fuelCost, requestedHeadlessTarget = null) {
   return withSerializedMatchmaking(`event:${event.id}`, async () =>
-    startMatch(player, 'event', event.id, 0, fuelCost),
+    startMatch(
+      player,
+      'event',
+      event.id,
+      0,
+      fuelCost,
+      true,
+      'a',
+      1,
+      null,
+      requestedHeadlessTarget,
+    ),
   );
 }
 
@@ -89,8 +102,10 @@ async function startMatch(
   tankTier = 'a',
   requestedStage = 1,
   preferredMatchId = null,
+  requestedHeadlessTarget = null,
 ) {
   const stage = Math.max(1, Math.floor(Number(requestedStage) || 1));
+  const headlessTarget = normalizeHeadlessTarget(requestedHeadlessTarget);
   if (reconnectExisting) {
     const existing = await findOpenAssignment(player.id, category, eventId);
     if (existing !== null) {
@@ -140,10 +155,10 @@ async function startMatch(
       await getPgPool().query(
         `
           INSERT INTO ${MATCH_TABLE}
-            (id, category, event_id, status, current_stage, created_at, updated_at)
-          VALUES ($1, $2, $3, 'waiting', 1, $4, $4)
+            (id, category, event_id, status, current_stage, headless_target, created_at, updated_at)
+          VALUES ($1, $2, $3, 'waiting', 1, $4, $5, $5)
         `,
-        [matchId, category, eventId, now],
+        [matchId, category, eventId, headlessTarget, now],
       );
     }
     await getPgPool().query(
@@ -212,6 +227,7 @@ async function startMatch(
         broadcasterStatus: null,
         broadcasterStartedAt: null,
         broadcasterWorkerUrl: null,
+        headlessTarget,
         createdAt: now,
         updatedAt: now,
         startedAt: null,
@@ -1247,7 +1263,7 @@ async function getMatch(matchId) {
     await ensureSchema();
     const result = await getPgPool().query(
       `
-        SELECT m.id, m.category, m.event_id, m.status, m.current_stage,
+        SELECT m.id, m.category, m.event_id, m.status, m.current_stage, m.headless_target,
           m.open_slots,
           m.created_at,
           m.started_at, m.completed_at, p.player_id, p.player_slot,
@@ -1563,6 +1579,13 @@ function normalizeLocalState(value) {
   };
 }
 
+function normalizeHeadlessTarget(value) {
+  const target = String(value || '').trim().toLowerCase();
+  return target === 'worker' || target === 'bom1' || target === 'usa'
+    ? target
+    : null;
+}
+
 function toPublicDatabaseMatch(rows) {
   const first = rows[0];
   return {
@@ -1587,6 +1610,7 @@ function toPublicDatabaseMatch(rows) {
     completedAt: first.completed_at
       ? new Date(first.completed_at).toISOString()
       : null,
+    headlessTarget: normalizeHeadlessTarget(first.headless_target),
   };
 }
 
@@ -1613,6 +1637,7 @@ function toPublicLocalMatch(state, match) {
     createdAt: match.createdAt,
     startedAt: match.startedAt,
     completedAt: match.completedAt,
+    headlessTarget: normalizeHeadlessTarget(match.headlessTarget),
   };
 }
 

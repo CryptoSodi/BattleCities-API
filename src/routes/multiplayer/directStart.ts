@@ -14,6 +14,7 @@ import { createPlayerRuntime } from './_runtime';
 
 const multiplayerStore = require('../../stores/multiplayerStore');
 const broadcasterService = require('../../services/broadcasterService');
+const headlessTarget = require('../../services/headlessTarget');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -38,6 +39,7 @@ export async function POST(request: Request): Promise<Response> {
       tankTier,
       stage,
       matchId,
+      headlessTarget.resolveRequestHeadlessTarget(request),
     );
     const abandonedMatchIds = Array.isArray(result.abandonedMatchIds)
       ? result.abandonedMatchIds
