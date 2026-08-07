@@ -16,6 +16,8 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const result = await adminStore.listPlayers({
       query: url.searchParams.get('q'),
+      lastSeenFrom: url.searchParams.get('lastSeenFrom'),
+      lastSeenTo: url.searchParams.get('lastSeenTo'),
       limit: url.searchParams.get('limit'),
       offset: url.searchParams.get('offset'),
     });
