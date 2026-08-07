@@ -376,7 +376,7 @@ function createObserverTicket(matchId: string, observerId: string, secret: strin
       matchId,
       kind: 'observer',
       observerId,
-      expiresAt: Date.now() + 5 * 60 * 1000,
+      expiresAt: Date.now() + 15 * 60 * 1000,
       nonce: toBase64Url(nodeCrypto.randomBytes(12)),
     })),
   );

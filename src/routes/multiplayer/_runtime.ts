@@ -66,7 +66,7 @@ function createWebSocketTicket(
   const payload = toBase64Url(Buffer.from(JSON.stringify({
     matchId,
     playerSlot,
-    expiresAt: Date.now() + 5 * 60 * 1000,
+    expiresAt: Date.now() + 15 * 60 * 1000,
     nonce: toBase64Url(randomBytes(12)),
   })));
   const signature = toBase64Url(createHmac('sha256', secret).update(payload).digest());
