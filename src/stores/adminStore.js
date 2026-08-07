@@ -45,7 +45,7 @@ async function listMatches(options = {}) {
   await database.assertMigrationsApplied();
   const limit = clampInteger(options.limit, 1, 100, 50);
   const offset = clampInteger(options.offset, 0, 100000, 0);
-  const status = MATCH_STATUSES.has(options.status) ? options.status : null;
+  const statuses = parseMatchStatuses(options.status);
   const category = MATCH_CATEGORIES.has(options.category) ? options.category : null;
 
   const result = await database.getPool().query(
@@ -74,13 +74,13 @@ async function listMatches(options = {}) {
       LEFT JOIN battlecity_players pl ON pl.id = p.player_id
       LEFT JOIN battlecity_multiplayer_scores s
         ON s.match_id = p.match_id AND s.player_id = p.player_id
-      WHERE ($1::TEXT IS NULL OR m.status = $1)
+      WHERE ($1::TEXT[] IS NULL OR m.status = ANY($1))
         AND ($2::TEXT IS NULL OR m.category = $2)
       GROUP BY m.id
       ORDER BY m.created_at DESC
       LIMIT $3 OFFSET $4
     `,
-    [status, category, limit, offset],
+    [statuses, category, limit, offset],
   );
 
   return {
@@ -89,6 +89,21 @@ async function listMatches(options = {}) {
     limit,
     offset,
   };
+}
+
+function parseMatchStatuses(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  const expanded = [];
+  for (const token of value.split(',').map((item) => item.trim())) {
+    if (token === 'active') {
+      expanded.push('waiting', 'ready', 'live', 'transition');
+    } else if (MATCH_STATUSES.has(token)) {
+      expanded.push(token);
+    }
+  }
+  return expanded.length === 0 ? null : expanded;
 }
 
 async function listPlayers(options = {}) {
