@@ -53,6 +53,7 @@ async function listMatches(options = {}) {
       SELECT
         m.id, m.category, m.event_id, m.status, m.current_stage,
         m.open_slots, m.broadcaster_status, m.broadcaster_started_at,
+        m.headless_target,
         m.created_at, m.updated_at, m.started_at, m.completed_at, m.closed_at,
         COUNT(*) OVER()::INTEGER AS total_count,
         COALESCE(
@@ -181,6 +182,9 @@ function fromMatchRow(row) {
     openSlots: Array.isArray(row.open_slots) ? row.open_slots.map(Number) : [],
     broadcasterStatus: row.broadcaster_status,
     broadcasterStartedAt: toIso(row.broadcaster_started_at),
+    headlessTarget: ['worker', 'bom1', 'usa'].includes(row.headless_target)
+      ? row.headless_target
+      : null,
     players: Array.isArray(row.players) ? row.players : [],
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),

@@ -16,6 +16,7 @@ const multiplayerStore = require('../../stores/multiplayerStore');
 const nodeCrypto = require('crypto');
 const signalStore = require('../../stores/webrtcSignalStore');
 const broadcasterService = require('../../services/broadcasterService');
+const headlessTarget = require('../../services/headlessTarget');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -49,6 +50,9 @@ export async function POST(
   }
   if (action === 'observe') {
     return observe(request, matchId);
+  }
+  if (action === 'spectate') {
+    return spectate(request, matchId);
   }
   if (action === 'result') {
     return submitAuthoritativeResult(request, matchId);
@@ -297,4 +301,77 @@ async function observe(request: Request, matchId: string): Promise<Response> {
 
 function cryptoRandomId(): string {
   return nodeCrypto.randomBytes(4).toString('hex');
+}
+
+async function spectate(request: Request, matchId: string): Promise<Response> {
+  const match = await multiplayerStore.getMatch(matchId);
+  if (match === null || match.status === 'closed') {
+    return createJsonResponse(request, { ok: false, error: 'Match not found' }, 404);
+  }
+  const target = headlessTarget.normalizeHeadlessTarget(match.headlessTarget) ||
+    headlessTarget.getDefaultHeadlessTarget();
+  if (headlessTarget.getHeadlessTransport(target) !== 'websocket') {
+    return createJsonResponse(
+      request,
+      {
+        ok: false,
+        error: 'This match does not use the websocket transport',
+        mode: 'webrtc',
+      },
+      409,
+    );
+  }
+  const secret = String(process.env.WEBSOCKET_TICKET_SECRET || '');
+  if (secret.length < 32) {
+    return createJsonResponse(
+      request,
+      { ok: false, error: 'WebSocket spectator transport is not configured' },
+      500,
+    );
+  }
+
+  let body: any = {};
+  try {
+    body = await request.json();
+  } catch {
+    // An observer ID is optional; the API creates one when omitted.
+  }
+  const observerId = signalStore.isValidObserverId(body?.observerId)
+    ? body.observerId
+    : cryptoRandomId();
+
+  const baseUrl = headlessTarget.getWebSocketBaseUrl(target);
+  const websocketUrl = new URL(
+    `${baseUrl}/matches/${encodeURIComponent(matchId)}/observers/${observerId}`,
+  );
+  websocketUrl.protocol = 'wss:';
+  websocketUrl.searchParams.set('ticket', createObserverTicket(matchId, observerId, secret));
+
+  return createJsonResponse(request, {
+    ok: true,
+    mode: 'websocket',
+    matchId,
+    observerId,
+    websocketUrl: websocketUrl.toString(),
+  });
+}
+
+function createObserverTicket(matchId: string, observerId: string, secret: string): string {
+  const payload = toBase64Url(
+    Buffer.from(JSON.stringify({
+      matchId,
+      kind: 'observer',
+      observerId,
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      nonce: toBase64Url(nodeCrypto.randomBytes(12)),
+    })),
+  );
+  const signature = toBase64Url(
+    nodeCrypto.createHmac('sha256', secret).update(payload).digest(),
+  );
+  return `${payload}.${signature}`;
+}
+
+function toBase64Url(value: Buffer): string {
+  return value.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
