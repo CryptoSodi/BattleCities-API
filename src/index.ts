@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const loadLocalEnv = require('./config/loadLocalEnv');
 const database = require('./database');
+const multiplayerStore = require('./stores/multiplayerStore');
 
 loadLocalEnv.loadLocalEnv();
 
@@ -69,6 +70,30 @@ async function start(): Promise<void> {
       console.log('[battlecities-api] authoritative broadcaster is embedded');
     }
   });
+  scheduleStaleMatchSweep();
+}
+
+const STALE_MATCH_SWEEP_MS = 60000;
+let staleMatchSweepRunning = false;
+
+function scheduleStaleMatchSweep(): void {
+  setInterval(() => {
+    if (staleMatchSweepRunning) return;
+    staleMatchSweepRunning = true;
+    multiplayerStore
+      .sweepStaleWaitingMatches()
+      .then((count) => {
+        if (count > 0) {
+          console.log(`[battlecities-api] closed ${count} stale waiting match(es)`);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[battlecities-api] stale match sweep failed', error);
+      })
+      .finally(() => {
+        staleMatchSweepRunning = false;
+      });
+  }, STALE_MATCH_SWEEP_MS);
 }
 
 async function serveDiagnosticPage(

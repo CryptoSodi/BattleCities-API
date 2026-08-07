@@ -408,6 +408,72 @@ async function abandonOpenDirectMatches(player) {
   return abandonedMatchIds;
 }
 
+async function sweepStaleWaitingMatches() {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const cutoff = new Date(Date.now() - WAITING_MATCH_ACTIVE_MS).toISOString();
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `
+        UPDATE ${MATCH_TABLE}
+        SET status = 'closed', closed_at = $2, updated_at = $2
+        WHERE id IN (
+          SELECT id FROM ${MATCH_TABLE}
+          WHERE status = 'waiting' AND updated_at < $1
+          LIMIT 1000
+        )
+        RETURNING id
+      `,
+      [cutoff, nowIso],
+    );
+    const ids = result.rows.map((row) => row.id);
+    if (ids.length === 0) {
+      return 0;
+    }
+    await getPgPool().query(
+      `
+        UPDATE ${PARTICIPANT_TABLE}
+        SET left_at = COALESCE(left_at, $2)
+        WHERE match_id = ANY($1::text[])
+      `,
+      [ids, nowIso],
+    );
+    return ids.length;
+  }
+
+  const state = await readLocalState();
+  const cutoffTimestamp = now.getTime() - WAITING_MATCH_ACTIVE_MS;
+  const staleIds = new Set(
+    state.matches
+      .filter((match) => {
+        return (
+          match.status === 'waiting' &&
+          Date.parse(match.updatedAt) < cutoffTimestamp
+        );
+      })
+      .map((match) => match.id),
+  );
+  if (staleIds.size === 0) {
+    return 0;
+  }
+  state.matches.forEach((match) => {
+    if (staleIds.has(match.id)) {
+      match.status = 'closed';
+      match.closedAt = nowIso;
+      match.updatedAt = nowIso;
+    }
+  });
+  state.participants.forEach((participant) => {
+    if (staleIds.has(participant.matchId)) {
+      participant.leftAt = participant.leftAt || nowIso;
+    }
+  });
+  await writeLocalState(state);
+  return staleIds.size;
+}
+
 async function ensureEventEntry(player, eventId, fuelCost) {
   const existing = await readEventEntry(eventId, player.id);
   if (existing !== null) {
@@ -1745,6 +1811,7 @@ module.exports = {
   setBroadcasterState,
   startDirectMatch,
   startEventMatch,
+  sweepStaleWaitingMatches,
   transitionMatchStage,
   isPersistentStoreConfigured: hasPersistentConfig,
 };
