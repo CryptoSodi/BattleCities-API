@@ -113,6 +113,12 @@ async function listPlayers(options = {}) {
   const offset = clampInteger(options.offset, 0, 100000, 0);
   const query = typeof options.query === 'string' ? options.query.trim().slice(0, 120) : '';
   const search = query === '' ? null : `%${query}%`;
+  const lastSeenFrom = /^\d{4}-\d{2}-\d{2}$/.test(options.lastSeenFrom)
+    ? options.lastSeenFrom
+    : null;
+  const lastSeenTo = /^\d{4}-\d{2}-\d{2}$/.test(options.lastSeenTo)
+    ? options.lastSeenTo
+    : null;
 
   const result = await database.getPool().query(
     `
@@ -137,11 +143,13 @@ async function listPlayers(options = {}) {
           AND ms.validation_status = 'accepted'
       WHERE ($1::TEXT IS NULL OR p.display_name ILIKE $1 OR p.google_email ILIKE $1
         OR p.id ILIKE $1)
+        AND ($4::DATE IS NULL OR p.last_seen_at >= $4::DATE)
+        AND ($5::DATE IS NULL OR p.last_seen_at < ($5::DATE + INTERVAL '1 day'))
       GROUP BY p.id, e.player_id
       ORDER BY p.last_seen_at DESC
       LIMIT $2 OFFSET $3
     `,
-    [search, limit, offset],
+    [search, limit, offset, lastSeenFrom, lastSeenTo],
   );
 
   return {
