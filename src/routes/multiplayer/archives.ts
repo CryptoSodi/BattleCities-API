@@ -6,6 +6,7 @@ import {
 
 const archiveStore = require('../../stores/matchArchiveStore');
 const broadcasterService = require('../../services/broadcasterService');
+const nodeCrypto = require('crypto');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -16,7 +17,7 @@ export async function GET(
   matchId: string | null = null,
   action: string | null = null,
 ): Promise<Response> {
-  if (!broadcasterService.isAuthorizedRequest(request)) {
+  if (!broadcasterService.isAuthorizedRequest(request) && !isAuthorizedObserverRead(request, matchId)) {
     return createJsonResponse(request, { ok: false, error: 'Forbidden' }, 403);
   }
   if (matchId === null) {
@@ -100,4 +101,62 @@ export async function POST(
       status,
     );
   }
+}
+
+function isAuthorizedObserverRead(request: Request, matchId: string | null): boolean {
+  if (matchId === null) {
+    return false;
+  }
+  const secret = String(process.env.WEBSOCKET_TICKET_SECRET || '');
+  if (secret.length < 32) {
+    return false;
+  }
+  const payload = verifyObserverTicket(
+    new URL(request.url).searchParams.get('ticket') || '',
+    secret,
+  );
+  return (
+    payload !== null &&
+    payload.kind === 'observer' &&
+    payload.matchId === matchId
+  );
+}
+
+function verifyObserverTicket(
+  ticket: string,
+  secret: string,
+): { matchId: string; kind: string; expiresAt: number } | null {
+  const [payload, signature, extra] = ticket.split('.');
+  if (!payload || !signature || extra !== undefined) {
+    return null;
+  }
+  let decoded: any;
+  try {
+    decoded = JSON.parse(
+      Buffer.from(fromBase64Url(payload), 'base64').toString('utf8'),
+    );
+  } catch {
+    return null;
+  }
+  if (
+    !decoded ||
+    decoded.kind !== 'observer' ||
+    typeof decoded.expiresAt !== 'number' ||
+    decoded.expiresAt < Date.now()
+  ) {
+    return null;
+  }
+  const expected = nodeCrypto.createHmac('sha256', secret).update(payload).digest();
+  const provided = Buffer.from(fromBase64Url(signature), 'base64');
+  if (
+    expected.length !== provided.length ||
+    !nodeCrypto.timingSafeEqual(expected, provided)
+  ) {
+    return null;
+  }
+  return decoded;
+}
+
+function fromBase64Url(value: string): string {
+  return value.replace(/-/g, '+').replace(/_/g, '/');
 }

@@ -308,19 +308,6 @@ async function spectate(request: Request, matchId: string): Promise<Response> {
   if (match === null || match.status === 'closed') {
     return createJsonResponse(request, { ok: false, error: 'Match not found' }, 404);
   }
-  const target = headlessTarget.normalizeHeadlessTarget(match.headlessTarget) ||
-    headlessTarget.getDefaultHeadlessTarget();
-  if (headlessTarget.getHeadlessTransport(target) !== 'websocket') {
-    return createJsonResponse(
-      request,
-      {
-        ok: false,
-        error: 'This match does not use the websocket transport',
-        mode: 'webrtc',
-      },
-      409,
-    );
-  }
   const secret = String(process.env.WEBSOCKET_TICKET_SECRET || '');
   if (secret.length < 32) {
     return createJsonResponse(
@@ -339,13 +326,40 @@ async function spectate(request: Request, matchId: string): Promise<Response> {
   const observerId = signalStore.isValidObserverId(body?.observerId)
     ? body.observerId
     : cryptoRandomId();
+  const ticket = createObserverTicket(matchId, observerId, secret);
+
+  // Finished matches are replayed from the archived frames, not a live
+  // stream. The observer fetches the archive by match id using this ticket.
+  if (match.status === 'completed') {
+    return createJsonResponse(request, {
+      ok: true,
+      mode: 'archive',
+      matchId,
+      observerId,
+      ticket,
+    });
+  }
+
+  const target = headlessTarget.normalizeHeadlessTarget(match.headlessTarget) ||
+    headlessTarget.getDefaultHeadlessTarget();
+  if (headlessTarget.getHeadlessTransport(target) !== 'websocket') {
+    return createJsonResponse(
+      request,
+      {
+        ok: false,
+        error: 'This match does not use the websocket transport',
+        mode: 'webrtc',
+      },
+      409,
+    );
+  }
 
   const baseUrl = headlessTarget.getWebSocketBaseUrl(target);
   const websocketUrl = new URL(
     `${baseUrl}/matches/${encodeURIComponent(matchId)}/observers/${observerId}`,
   );
   websocketUrl.protocol = 'wss:';
-  websocketUrl.searchParams.set('ticket', createObserverTicket(matchId, observerId, secret));
+  websocketUrl.searchParams.set('ticket', ticket);
 
   return createJsonResponse(request, {
     ok: true,
