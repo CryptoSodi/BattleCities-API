@@ -16,10 +16,21 @@ export function OPTIONS(request: Request): Response {
 export async function GET(
   request: Request,
   playerId: string,
+  matchResultId: string | null = null,
 ): Promise<Response> {
   const player = await playerStore.readPlayer(playerId);
   if (player === null) {
     return createJsonResponse(request, { error: 'Player not found' }, 404);
+  }
+
+  if (matchResultId !== null) {
+    const replay = await matchResultStore.getPublicPlayerReplay(
+      player.id,
+      matchResultId,
+    );
+    return replay === null
+      ? createJsonResponse(request, { error: 'Replay not found' }, 404)
+      : createJsonResponse(request, { item: { replay } });
   }
 
   const currentSeason = await seasonStore.getCurrentSeason();

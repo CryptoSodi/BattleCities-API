@@ -258,11 +258,13 @@ async function getPlayerResults(playerId, limit = 10) {
     await ensureSchema();
     const result = await getPgPool().query(
       `
-        SELECT id, season_id, mode, level_number, score, game_points, won,
-          validation_status, created_at
-        FROM ${TABLE_NAME}
-        WHERE player_id = $1 AND validation_status <> 'rejected'
-        ORDER BY created_at DESC
+        SELECT m.id, m.season_id, m.mode, m.level_number, m.score,
+          m.game_points, m.won, m.validation_status, m.created_at,
+          (r.id IS NOT NULL) AS replay_available
+        FROM ${TABLE_NAME} m
+        LEFT JOIN battlecity_replays r ON r.id = m.replay_id
+        WHERE m.player_id = $1 AND m.validation_status <> 'rejected'
+        ORDER BY m.created_at DESC
         LIMIT $2
       `,
       [playerId, safeLimit],
@@ -277,6 +279,7 @@ async function getPlayerResults(playerId, limit = 10) {
       gamePoints: Number(row.game_points),
       won: row.won === true,
       validationStatus: row.validation_status,
+      replayAvailable: row.replay_available === true,
       createdAt: new Date(row.created_at).toISOString(),
     }));
   }
@@ -311,6 +314,31 @@ async function getPlayerResults(playerId, limit = 10) {
   return results
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
     .slice(0, safeLimit);
+}
+
+async function getPublicPlayerReplay(playerId, resultId) {
+  if (!isValidPlayerId(playerId) || !/^mtc-[a-z0-9-]+$/i.test(resultId)) {
+    return null;
+  }
+  if (!hasPersistentConfig()) {
+    return null;
+  }
+
+  await ensureSchema();
+  const result = await getPgPool().query(
+    `
+      SELECT r.replay_json
+      FROM ${TABLE_NAME} m
+      JOIN battlecity_replays r ON r.id = m.replay_id
+      WHERE m.id = $1
+        AND m.player_id = $2
+        AND m.validation_status <> 'rejected'
+      LIMIT 1
+    `,
+    [resultId, playerId],
+  );
+  const replay = result.rows[0]?.replay_json;
+  return typeof replay === 'object' && replay !== null ? replay : null;
 }
 
 async function aggregateFileResults(scopeSeasonId) {
@@ -375,6 +403,7 @@ function toPublicResult(result) {
     gamePoints: result.gamePoints,
     won: result.won,
     validationStatus: result.validationStatus,
+    replayAvailable: typeof result.replayId === 'string',
     createdAt: result.createdAt,
   };
 }
@@ -412,6 +441,7 @@ module.exports = {
   computeGamePoints,
   getLeaderboard,
   getPlayerRank,
+  getPublicPlayerReplay,
   getPlayerResults,
   submitResult,
   toPublicResult,

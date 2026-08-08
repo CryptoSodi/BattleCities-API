@@ -106,7 +106,7 @@ const multiplayerMatchRoutePattern = /^multiplayer\/matches\/([^/]+)$/;
 const multiplayerMatchActionRoutePattern = /^multiplayer\/matches\/([^/]+)\/([^/]+)$/;
 const multiplayerArchiveRoutePattern = /^multiplayer\/archives(?:\/([^/]+))?(?:\/([^/]+))?$/;
 const multiplayerEventRoutePattern = /^events\/([^/]+)\/(enter|start|leaderboard|prizes\/approve)$/;
-const playerProfileRoutePattern = /^players\/([^/]+)\/profile$/;
+const playerProfileRoutePattern = /^players\/([^/]+)\/profile(?:\/matches\/([^/]+)\/replay)?$/;
 const discordVerifiedUserRoutePattern = /^integrations\/discord\/verified-users\/([^/]+)$/;
 const adminTournamentRoutePattern = /^admin\/tournaments\/([^/]+)(?:\/(leaderboard|prizes\/distribute))?$/;
 
@@ -155,10 +155,10 @@ async function dispatch(request: Request): Promise<Response> {
   }
   const playerProfileMatch = route.match(playerProfileRoutePattern);
   if (playerProfileMatch !== null) {
-    const [, playerId] = playerProfileMatch;
+    const [, playerId, matchResultId = null] = playerProfileMatch;
     const method = request.method.toUpperCase();
     if (method === 'GET') {
-      return playerProfile.GET(request, playerId);
+      return playerProfile.GET(request, playerId, matchResultId);
     }
     if (method === 'OPTIONS') {
       return playerProfile.OPTIONS(request);
