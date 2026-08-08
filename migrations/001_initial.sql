@@ -105,8 +105,7 @@ CREATE TABLE IF NOT EXISTS battlecity_replays (
   kills INTEGER NOT NULL DEFAULT 0,
   game_result TEXT NOT NULL DEFAULT 'loss',
   duration_ticks INTEGER NOT NULL DEFAULT 0,
-  replay_blob_path TEXT NOT NULL,
-  replay_blob_url TEXT NOT NULL,
+  replay_json JSONB NOT NULL,
   validation_status TEXT NOT NULL DEFAULT 'pending'
 );
 

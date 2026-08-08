@@ -8,8 +8,6 @@ const TABLE_NAME = 'battlecity_replays';
 const VALID_MATCH_STATUSES = ['pending', 'verified', 'rejected'];
 const VALID_GAME_RESULTS = ['win', 'loss'];
 
-let blobClient = null;
-
 function getDataDir() {
   return (
     process.env.BATTLECITY_REPLAY_DIR ||
@@ -18,25 +16,11 @@ function getDataDir() {
 }
 
 function hasPersistentConfig() {
-  const hasBlobConfig =
-    String(process.env.BLOB_READ_WRITE_TOKEN || '').trim() !== '';
-  if (storageConfig.isProductionRuntime() && !hasBlobConfig) {
-    throw new Error('BLOB_READ_WRITE_TOKEN is required in production');
-  }
-  return storageConfig.hasDatabaseConfig() && hasBlobConfig;
+  return storageConfig.hasDatabaseConfig();
 }
 
 function getPgPool() {
   return database.getPool();
-}
-
-function getBlobClient() {
-  if (blobClient !== null) {
-    return blobClient;
-  }
-
-  blobClient = require('@vercel/blob');
-  return blobClient;
 }
 
 async function ensureSchema() {
@@ -127,7 +111,7 @@ async function listPersistentSummaries(guestId) {
 // Admin/worker read: fetch a replay record by id WITHOUT guest scoping. Used
 // only by server-side validation (scripts/validate-results.js) — never expose
 // through a client-facing endpoint. In Postgres mode only the metadata row is
-// returned (replay: null) — the cross-checks don't need the input blob.
+// returned (replay: null) — the cross-checks don't need the input payload.
 async function readRecordAdmin(id) {
   if (!isSafeId(id)) {
     return null;
@@ -180,7 +164,7 @@ async function readPersistentRecord(id, guestId) {
   const result = await getPgPool().query(
     `
       SELECT id, guest_id, created_at, level_number, score, kills,
-        game_result, duration_ticks, replay_blob_path, validation_status
+        game_result, duration_ticks, replay_json, validation_status
       FROM ${TABLE_NAME}
       WHERE id = $1
         AND guest_id = $2
@@ -194,7 +178,7 @@ async function readPersistentRecord(id, guestId) {
   }
 
   const row = result.rows[0];
-  const replay = await readReplayBlob(row.replay_blob_path);
+  const replay = row.replay_json;
   if (!isValidReplay(replay)) {
     return null;
   }
@@ -216,36 +200,24 @@ async function readPersistentRecord(id, guestId) {
 async function createPersistentRecord(record) {
   await ensureSchema();
 
-  const blobPath = `replays/${record.guestId}/${record.id}.json`;
-  const blob = await getBlobClient().put(
-    blobPath,
-    JSON.stringify(record.replay),
-    {
-      access: 'private',
-      addRandomSuffix: false,
-      contentType: 'application/json',
-    },
-  );
-
   await getPgPool().query(
     `
       INSERT INTO ${TABLE_NAME}
-        (id, guest_id, created_at, level_number, replay_blob_path,
-          score, kills, game_result, duration_ticks, replay_blob_url,
+        (id, guest_id, created_at, level_number, replay_json,
+          score, kills, game_result, duration_ticks,
           validation_status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
     `,
     [
       record.id,
       record.guestId,
       record.createdAt,
       record.levelNumber,
-      blobPath,
+      JSON.stringify(record.replay),
       record.score,
       record.kills,
       record.gameResult,
       record.durationTicks,
-      blob.url,
       record.validationStatus,
     ],
   );
@@ -265,7 +237,7 @@ async function updatePersistentValidationStatus(id, guestId, validationStatus) {
       WHERE id = $1
         AND guest_id = $2
       RETURNING id, guest_id, created_at, level_number, score, kills,
-        game_result, duration_ticks, replay_blob_path, validation_status
+        game_result, duration_ticks, replay_json, validation_status
     `,
     [id, guestId, validationStatus],
   );
@@ -275,7 +247,7 @@ async function updatePersistentValidationStatus(id, guestId, validationStatus) {
   }
 
   const row = result.rows[0];
-  const replay = await readReplayBlob(row.replay_blob_path);
+  const replay = row.replay_json;
   if (!isValidReplay(replay)) {
     return null;
   }
@@ -294,21 +266,10 @@ async function updatePersistentValidationStatus(id, guestId, validationStatus) {
   };
 }
 
-async function readReplayBlob(pathname) {
-  const { get } = getBlobClient();
-  const result = await get(pathname, { access: 'private' });
-
-  if (result?.statusCode !== 200 || result.stream === null) {
-    return null;
-  }
-
-  return new Response(result.stream).json();
-}
-
 async function prunePersistentRecords(guestId) {
   const result = await getPgPool().query(
     `
-      SELECT id, replay_blob_path
+      SELECT id
       FROM ${TABLE_NAME}
       WHERE guest_id = $1
       ORDER BY created_at DESC
@@ -324,11 +285,6 @@ async function prunePersistentRecords(guestId) {
   await getPgPool().query(
     `DELETE FROM ${TABLE_NAME} WHERE id = ANY($1::text[])`,
     [result.rows.map((row) => row.id)],
-  );
-
-  const { del } = getBlobClient();
-  await Promise.all(
-    result.rows.map((row) => del(row.replay_blob_path).catch(() => undefined)),
   );
 }
 

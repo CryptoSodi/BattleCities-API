@@ -51,7 +51,7 @@ test('production rejects forced local storage even with a database URL', () => {
   );
 });
 
-test('production replay storage requires blob configuration', async () => {
+test('production replay storage uses the configured database without blob storage', async () => {
   await withEnvironmentAsync(
     {
       NODE_ENV: 'production',
@@ -59,10 +59,7 @@ test('production replay storage requires blob configuration', async () => {
     },
     async () => {
       const replayStore = require('../src/stores/replayStore');
-      assert.throws(
-        () => replayStore.isPersistentStoreConfigured(),
-        /BLOB_READ_WRITE_TOKEN is required in production/,
-      );
+      assert.equal(replayStore.isPersistentStoreConfigured(), true);
     },
   );
 });
