@@ -14,6 +14,14 @@ export async function GET(request: Request): Promise<Response> {
   if (isResponse(authorization)) return authorization;
   const url = new URL(request.url);
   try {
+    const id = url.searchParams.get('id');
+    if (id !== null) {
+      const item = await adminStore.getReplay(id);
+      if (item === null) {
+        return createJsonResponse(request, { ok: false, error: 'Replay not found' }, 404);
+      }
+      return createJsonResponse(request, { ok: true, item });
+    }
     return createJsonResponse(request, {
       ok: true,
       ...(await adminStore.listReplays({

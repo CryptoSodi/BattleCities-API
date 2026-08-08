@@ -126,6 +126,42 @@ async function listReplays(options = {}) {
   };
 }
 
+async function getReplay(id) {
+  assertPersistentStorage();
+  await database.assertMigrationsApplied();
+  if (typeof id !== 'string' || !/^[a-z0-9-]{1,120}$/i.test(id)) {
+    return null;
+  }
+
+  const result = await database.getPool().query(
+    `
+      SELECT id, guest_id, created_at, level_number, score, kills,
+        game_result, duration_ticks, validation_status, replay_json
+      FROM battlecity_replays
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+  const row = result.rows[0];
+  if (row === undefined || row.replay_json === null || typeof row.replay_json !== 'object') {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    guestId: row.guest_id,
+    createdAt: toIso(row.created_at),
+    levelNumber: Number(row.level_number),
+    score: Number(row.score),
+    kills: Number(row.kills),
+    gameResult: row.game_result,
+    durationTicks: Number(row.duration_ticks),
+    validationStatus: row.validation_status,
+    replay: row.replay_json,
+  };
+}
+
 function parseMatchStatuses(value) {
   if (typeof value !== 'string' || value.trim() === '') {
     return null;
@@ -256,4 +292,4 @@ function toIso(value) {
   return value == null ? null : new Date(value).toISOString();
 }
 
-module.exports = { getOverview, listMatches, listPlayers, listReplays };
+module.exports = { getOverview, getReplay, listMatches, listPlayers, listReplays };
