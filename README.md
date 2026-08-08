@@ -67,7 +67,7 @@ BATTLECITY_EMBED_BROADCASTER=1
 BROADCASTER_BASE_URL=http://127.0.0.1:3001
 BROADCASTER_API_URL=http://127.0.0.1:3001
 BROADCASTER_PUBLIC_URL=https://api.battlecities.com
-BROADCASTER_CLIENT_URL=https://www.battlecities.com
+BROADCASTER_CLIENT_URL=https://play.battlecities.com
 ```
 
 Embedded mode generates its private route-authorization token automatically at
@@ -152,7 +152,7 @@ Useful variables:
   same-origin until this is set to `https://api.battlecities.com` in the
   frontend Vercel project.
 - `BATTLECITY_WEB_BASE_URL`: game origin used after API-hosted OAuth callbacks;
-  set it to `https://www.battlecities.com` in production.
+  set it to `https://play.battlecities.com` in production.
 - `BATTLECITY_EVENT_ADMIN_SECRET`: bearer token required to approve final event
   prize allocations after an event ends.
 - `BROADCASTER_BASE_URL`: loopback broadcaster-control origin; embedded
