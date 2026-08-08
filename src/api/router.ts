@@ -6,6 +6,7 @@ import * as googleAuthStart from '../routes/auth/google/start';
 import * as adminMatches from '../routes/admin/matches';
 import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
+import * as adminReplays from '../routes/admin/replays';
 import * as adminSession from '../routes/admin/session';
 import * as adminTournaments from '../routes/admin/tournaments';
 import * as boostStatus from '../routes/boost/status';
@@ -54,6 +55,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
+  'admin/replays': adminReplays,
   'admin/session': adminSession,
   'admin/tournaments': {
     GET: adminTournaments.GET,

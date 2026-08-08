@@ -92,6 +92,40 @@ async function listMatches(options = {}) {
   };
 }
 
+async function listReplays(options = {}) {
+  assertPersistentStorage();
+  await database.assertMigrationsApplied();
+  const limit = clampInteger(options.limit, 1, 100, 50);
+  const offset = clampInteger(options.offset, 0, 100000, 0);
+  const result = await database.getPool().query(
+    `
+      SELECT id, guest_id, created_at, level_number, score, kills,
+        game_result, duration_ticks, validation_status,
+        COUNT(*) OVER()::INTEGER AS total_count
+      FROM battlecity_replays
+      ORDER BY created_at DESC
+      LIMIT $1 OFFSET $2
+    `,
+    [limit, offset],
+  );
+  return {
+    items: result.rows.map((row) => ({
+      id: row.id,
+      guestId: row.guest_id,
+      createdAt: toIso(row.created_at),
+      levelNumber: Number(row.level_number),
+      score: Number(row.score),
+      kills: Number(row.kills),
+      gameResult: row.game_result,
+      durationTicks: Number(row.duration_ticks),
+      validationStatus: row.validation_status,
+    })),
+    total: result.rowCount > 0 ? Number(result.rows[0].total_count) : 0,
+    limit,
+    offset,
+  };
+}
+
 function parseMatchStatuses(value) {
   if (typeof value !== 'string' || value.trim() === '') {
     return null;
@@ -222,4 +256,4 @@ function toIso(value) {
   return value == null ? null : new Date(value).toISOString();
 }
 
-module.exports = { getOverview, listMatches, listPlayers };
+module.exports = { getOverview, listMatches, listPlayers, listReplays };
