@@ -244,7 +244,7 @@ async function getPlayerRank(playerId, seasonId) {
   };
 }
 
-async function getPlayerResults(playerId, limit = 10) {
+async function getPlayerResults(playerId, limit = 10, offset = 0) {
   if (!isValidPlayerId(playerId)) {
     return [];
   }
@@ -253,6 +253,7 @@ async function getPlayerResults(playerId, limit = 10) {
     1,
     Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 10),
   );
+  const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
 
   if (hasPersistentConfig()) {
     await ensureSchema();
@@ -266,8 +267,9 @@ async function getPlayerResults(playerId, limit = 10) {
         WHERE m.player_id = $1 AND m.validation_status <> 'rejected'
         ORDER BY m.created_at DESC
         LIMIT $2
+        OFFSET $3
       `,
-      [playerId, safeLimit],
+      [playerId, safeLimit, safeOffset],
     );
 
     return result.rows.map((row) => ({
@@ -313,7 +315,54 @@ async function getPlayerResults(playerId, limit = 10) {
 
   return results
     .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-    .slice(0, safeLimit);
+    .slice(safeOffset, safeOffset + safeLimit);
+}
+
+async function getPlayerResultCount(playerId) {
+  if (!isValidPlayerId(playerId)) {
+    return 0;
+  }
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `
+        SELECT COUNT(*) AS total
+        FROM ${TABLE_NAME}
+        WHERE player_id = $1 AND validation_status <> 'rejected'
+      `,
+      [playerId],
+    );
+    return Number(result.rows[0]?.total) || 0;
+  }
+
+  let files;
+  try {
+    files = await fs.readdir(getDataDir());
+  } catch {
+    return 0;
+  }
+
+  let total = 0;
+  for (const file of files) {
+    if (!file.endsWith('.json')) {
+      continue;
+    }
+    try {
+      const result = JSON.parse(
+        await fs.readFile(path.join(getDataDir(), file), 'utf8'),
+      );
+      if (
+        result.playerId === playerId &&
+        result.validationStatus !== 'rejected'
+      ) {
+        total += 1;
+      }
+    } catch {
+      // Ignore malformed local development records.
+    }
+  }
+  return total;
 }
 
 async function getPublicPlayerReplay(playerId, resultId) {
@@ -442,6 +491,7 @@ module.exports = {
   getLeaderboard,
   getPlayerRank,
   getPublicPlayerReplay,
+  getPlayerResultCount,
   getPlayerResults,
   submitResult,
   toPublicResult,

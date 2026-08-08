@@ -9,6 +9,8 @@ const matchResultStore = require('../../stores/matchResultStore');
 const playerStore = require('../../stores/playerStore');
 const seasonStore = require('../../stores/seasonStore');
 
+const MATCHES_PER_PAGE = 12;
+
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
@@ -34,10 +36,16 @@ export async function GET(
   }
 
   const currentSeason = await seasonStore.getCurrentSeason();
-  const [allTime, season, recentMatches] = await Promise.all([
+  const page = readPage(request);
+  const [allTime, season, recentMatches, totalMatches] = await Promise.all([
     matchResultStore.getPlayerRank(player.id, null),
     matchResultStore.getPlayerRank(player.id, currentSeason.id),
-    matchResultStore.getPlayerResults(player.id, 12),
+    matchResultStore.getPlayerResults(
+      player.id,
+      MATCHES_PER_PAGE,
+      (page - 1) * MATCHES_PER_PAGE,
+    ),
+    matchResultStore.getPlayerResultCount(player.id),
   ]);
 
   return createJsonResponse(request, {
@@ -62,8 +70,22 @@ export async function GET(
         },
       },
       recentMatches,
+      recentMatchesPage: {
+        page,
+        pageSize: MATCHES_PER_PAGE,
+        total: totalMatches,
+      },
     },
   });
+}
+
+function readPage(request: Request): number {
+  const value = new URL(request.url).searchParams.get('page');
+  const page = Number(value);
+  if (!Number.isFinite(page)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(10_000, Math.floor(page)));
 }
 
 function toPublicRank(rank: any): {
