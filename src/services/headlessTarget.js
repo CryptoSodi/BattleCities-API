@@ -1,6 +1,6 @@
 const HEADLESS_TARGET_HEADER = 'x-battlecities-headless';
 
-const HEADLESS_TARGETS = new Set(['worker', 'bom1', 'usa']);
+const HEADLESS_TARGETS = new Set(['worker', 'bom1']);
 
 function normalizeHeadlessTarget(value) {
   const target = String(value || '').trim().toLowerCase();
@@ -17,7 +17,7 @@ function getDefaultHeadlessTarget() {
   if (transport === 'websocket') {
     return 'worker';
   }
-  return 'usa';
+  return 'worker';
 }
 
 function resolveRequestHeadlessTarget(request) {
@@ -26,8 +26,8 @@ function resolveRequestHeadlessTarget(request) {
   ) || getDefaultHeadlessTarget();
 }
 
-function getHeadlessTransport(target) {
-  return target === 'usa' ? 'webrtc' : 'websocket';
+function getHeadlessTransport() {
+  return 'websocket';
 }
 
 function getWebSocketBaseUrl(target) {
@@ -44,7 +44,8 @@ function getBroadcasterBaseUrl(target) {
     : target === 'worker'
       ? process.env.WEBSOCKET_BROADCASTER_BASE_URL ||
         process.env.WEBSOCKET_BASE_URL
-      : process.env.BROADCASTER_BASE_URL;
+      : process.env.WEBSOCKET_BROADCASTER_BASE_URL ||
+        process.env.WEBSOCKET_BASE_URL;
   return String(value || '').trim().replace(/\/+$/, '');
 }
 

@@ -118,6 +118,12 @@ test('headless target migration constrains persisted runtime selection', async (
   );
   assert.match(sql, /ADD COLUMN IF NOT EXISTS headless_target TEXT NULL/);
   assert.match(sql, /'worker', 'bom1', 'usa'/);
+  const removalSql = await fs.readFile(
+    path.join(packageRoot, 'migrations/011_remove_usa_headless_target.sql'),
+    'utf8',
+  );
+  assert.match(removalSql, /SET headless_target = 'worker'/);
+  assert.match(removalSql, /'worker', 'bom1'/);
 });
 
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {

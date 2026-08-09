@@ -252,7 +252,7 @@ function fromMatchRow(row) {
     openSlots: Array.isArray(row.open_slots) ? row.open_slots.map(Number) : [],
     broadcasterStatus: row.broadcaster_status,
     broadcasterStartedAt: toIso(row.broadcaster_started_at),
-    headlessTarget: ['worker', 'bom1', 'usa'].includes(row.headless_target)
+    headlessTarget: ['worker', 'bom1'].includes(row.headless_target)
       ? row.headless_target
       : null,
     players: Array.isArray(row.players) ? row.players : [],

@@ -15,22 +15,12 @@ const multiplayerStore = require('./stores/multiplayerStore');
 
 loadLocalEnv.loadLocalEnv();
 
-configureEmbeddedBroadcasterToken();
-const embeddedBroadcaster = loadEmbeddedBroadcaster();
-
 const port = parsePort(process.env.PORT, 3001);
 const host = process.env.BATTLECITY_API_HOST || '127.0.0.1';
 const diagnosticPages = new Set(['/ws-latency.html', '/webrtc-latency.html']);
 
 const server = http.createServer(async (incoming: any, outgoing: any) => {
   try {
-    if (
-      embeddedBroadcaster !== null &&
-      embeddedBroadcaster.isBroadcasterRequestPath(getPathname(incoming.url))
-    ) {
-      await embeddedBroadcaster.handleBroadcasterRequest(incoming, outgoing);
-      return;
-    }
     if (await serveDiagnosticPage(incoming, outgoing)) {
       return;
     }
@@ -66,9 +56,6 @@ async function start(): Promise<void> {
   await database.assertStartupReady();
   server.listen(port, host, () => {
     console.log(`[battlecities-api] listening on http://${host}:${port}`);
-    if (embeddedBroadcaster !== null) {
-      console.log('[battlecities-api] authoritative broadcaster is embedded');
-    }
   });
   scheduleStaleMatchSweep();
 }
@@ -287,32 +274,6 @@ function createWebSocketFrame(payload: any, opcode = 0x1): any {
   return Buffer.concat([header, payload]);
 }
 
-function loadEmbeddedBroadcaster(): any | null {
-  if (!isEnabled(process.env.BATTLECITY_EMBED_BROADCASTER)) {
-    return null;
-  }
-  const runtimePath = path.resolve(
-    process.cwd(),
-    'dist-broadcaster',
-    'scripts',
-    'headless-broadcaster-runtime.js',
-  );
-  return require(runtimePath);
-}
-
-function configureEmbeddedBroadcasterToken(): void {
-  if (
-    isEnabled(process.env.BATTLECITY_EMBED_BROADCASTER) &&
-    String(process.env.BROADCASTER_SERVICE_TOKEN || '').trim() === ''
-  ) {
-    process.env.BROADCASTER_SERVICE_TOKEN = crypto.randomBytes(32).toString('hex');
-  }
-}
-
-function isEnabled(value: unknown): boolean {
-  return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
-}
-
 function getPathname(value: unknown): string {
   return new URL(String(value || '/'), 'http://127.0.0.1').pathname;
 }
@@ -383,9 +344,6 @@ function shutdown(signal: string): void {
   shuttingDown = true;
   console.log(`[battlecities-api] ${signal} received; shutting down`);
   void (async () => {
-    if (embeddedBroadcaster !== null) {
-      await embeddedBroadcaster.shutdownBroadcaster();
-    }
     server.close(async (error: Error | undefined) => {
       if (error !== undefined) {
         console.error('[battlecities-api] shutdown failed', error);
@@ -394,7 +352,7 @@ function shutdown(signal: string): void {
       await database.closePool();
     });
   })().catch((error) => {
-    console.error('[battlecities-api] broadcaster shutdown failed', error);
+    console.error('[battlecities-api] shutdown failed', error);
     process.exitCode = 1;
     server.close(() => void database.closePool());
   });

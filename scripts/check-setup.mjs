@@ -10,7 +10,6 @@ const storageConfig = require('../src/config/storageConfig');
 
 const databaseUrl = storageConfig.getDatabaseUrl();
 const database = describeDatabase(databaseUrl);
-const embeddedBroadcaster = isEnabled('BATTLECITY_EMBED_BROADCASTER');
 const status = {
   postgres: {
     configured: databaseUrl !== '',
@@ -29,15 +28,12 @@ const status = {
   },
   broadcaster: {
     configured:
-      isConfigured('BROADCASTER_BASE_URL') &&
-      (embeddedBroadcaster || isConfigured('BROADCASTER_SERVICE_TOKEN')),
-    embedded: embeddedBroadcaster,
-    baseUrl: process.env.BROADCASTER_BASE_URL || null,
+      isConfigured('WEBSOCKET_BROADCASTER_BASE_URL') &&
+      isConfigured('BROADCASTER_SERVICE_TOKEN'),
+    baseUrl: process.env.WEBSOCKET_BROADCASTER_BASE_URL || null,
     serviceToken: isConfigured('BROADCASTER_SERVICE_TOKEN')
       ? 'configured'
-      : embeddedBroadcaster
-        ? 'generated at startup'
-        : 'missing',
+      : 'missing',
   },
 };
 
@@ -53,12 +49,6 @@ if (
 
 function isConfigured(name) {
   return String(process.env[name] || '').trim() !== '';
-}
-
-function isEnabled(name) {
-  return ['1', 'true', 'yes'].includes(
-    String(process.env[name] || '').trim().toLowerCase(),
-  );
 }
 
 function describeDatabase(value) {

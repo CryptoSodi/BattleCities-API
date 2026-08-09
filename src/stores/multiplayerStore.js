@@ -1647,7 +1647,7 @@ function normalizeLocalState(value) {
 
 function normalizeHeadlessTarget(value) {
   const target = String(value || '').trim().toLowerCase();
-  return target === 'worker' || target === 'bom1' || target === 'usa'
+  return target === 'worker' || target === 'bom1'
     ? target
     : null;
 }
