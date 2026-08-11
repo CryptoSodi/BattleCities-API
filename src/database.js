@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '010_headless_target';
+const REQUIRED_MIGRATION = '012_replays_linked_player';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

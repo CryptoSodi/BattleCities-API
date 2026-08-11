@@ -55,13 +55,14 @@ async function readRecord(id, guestId) {
   return readFileRecord(id, guestId);
 }
 
-async function createRecord(guestId, replay) {
+async function createRecord(guestId, replay, playerId = null) {
   normalizeReplay(replay);
   const metadata = normalizeMetadata(replay.metadata);
 
   const record = {
     id: createReplayId(),
     guestId,
+    playerId,
     createdAt: new Date().toISOString(),
     levelNumber: replay.levelNumber,
     score: metadata.score,
@@ -86,7 +87,7 @@ async function listPersistentSummaries(guestId) {
 
   const result = await getPgPool().query(
     `
-      SELECT id, created_at, level_number, score, kills, game_result,
+      SELECT id, player_id, created_at, level_number, score, kills, game_result,
         duration_ticks, validation_status
       FROM ${TABLE_NAME}
       WHERE guest_id = $1
@@ -98,6 +99,7 @@ async function listPersistentSummaries(guestId) {
 
   return result.rows.map((row) => ({
     id: row.id,
+    playerId: row.player_id || null,
     createdAt: new Date(row.created_at).toISOString(),
     levelNumber: row.level_number,
     score: row.score,
@@ -121,7 +123,7 @@ async function readRecordAdmin(id) {
     await ensureSchema();
     const result = await getPgPool().query(
       `
-        SELECT id, guest_id, created_at, level_number, score, kills,
+        SELECT id, guest_id, player_id, created_at, level_number, score, kills,
           game_result, duration_ticks, validation_status
         FROM ${TABLE_NAME}
         WHERE id = $1
@@ -138,6 +140,7 @@ async function readRecordAdmin(id) {
     return {
       id: row.id,
       guestId: row.guest_id,
+      playerId: row.player_id || null,
       createdAt: new Date(row.created_at).toISOString(),
       levelNumber: row.level_number,
       score: row.score,
@@ -163,7 +166,7 @@ async function readPersistentRecord(id, guestId) {
 
   const result = await getPgPool().query(
     `
-      SELECT id, guest_id, created_at, level_number, score, kills,
+      SELECT id, guest_id, player_id, created_at, level_number, score, kills,
         game_result, duration_ticks, replay_json, validation_status
       FROM ${TABLE_NAME}
       WHERE id = $1
@@ -186,6 +189,7 @@ async function readPersistentRecord(id, guestId) {
   return {
     id: row.id,
     guestId: row.guest_id,
+    playerId: row.player_id || null,
     createdAt: new Date(row.created_at).toISOString(),
     levelNumber: row.level_number,
     score: row.score,
@@ -203,14 +207,15 @@ async function createPersistentRecord(record) {
   await getPgPool().query(
     `
       INSERT INTO ${TABLE_NAME}
-        (id, guest_id, created_at, level_number, replay_json,
+        (id, guest_id, player_id, created_at, level_number, replay_json,
           score, kills, game_result, duration_ticks,
           validation_status)
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
     `,
     [
       record.id,
       record.guestId,
+      record.playerId || null,
       record.createdAt,
       record.levelNumber,
       JSON.stringify(record.replay),
@@ -236,7 +241,7 @@ async function updatePersistentValidationStatus(id, guestId, validationStatus) {
       SET validation_status = $3
       WHERE id = $1
         AND guest_id = $2
-      RETURNING id, guest_id, created_at, level_number, score, kills,
+      RETURNING id, guest_id, player_id, created_at, level_number, score, kills,
         game_result, duration_ticks, replay_json, validation_status
     `,
     [id, guestId, validationStatus],
@@ -255,6 +260,7 @@ async function updatePersistentValidationStatus(id, guestId, validationStatus) {
   return {
     id: row.id,
     guestId: row.guest_id,
+    playerId: row.player_id || null,
     createdAt: new Date(row.created_at).toISOString(),
     levelNumber: row.level_number,
     score: row.score,
@@ -373,6 +379,7 @@ async function pruneFileRecords(guestId) {
 function toSummary(record) {
   return {
     id: record.id,
+    playerId: record.playerId || null,
     createdAt: record.createdAt,
     levelNumber: record.levelNumber,
     score: record.score || 0,

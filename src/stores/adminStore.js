@@ -99,11 +99,13 @@ async function listReplays(options = {}) {
   const offset = clampInteger(options.offset, 0, 100000, 0);
   const result = await database.getPool().query(
     `
-      SELECT id, guest_id, created_at, level_number, score, kills,
-        game_result, duration_ticks, validation_status,
+      SELECT r.id, r.guest_id, r.player_id, r.created_at, r.level_number,
+        r.score, r.kills, r.game_result, r.duration_ticks, r.validation_status,
+        p.display_name AS player_display_name,
         COUNT(*) OVER()::INTEGER AS total_count
-      FROM battlecity_replays
-      ORDER BY created_at DESC
+      FROM battlecity_replays r
+      LEFT JOIN battlecity_players p ON p.id = r.player_id
+      ORDER BY r.created_at DESC
       LIMIT $1 OFFSET $2
     `,
     [limit, offset],
@@ -112,6 +114,8 @@ async function listReplays(options = {}) {
     items: result.rows.map((row) => ({
       id: row.id,
       guestId: row.guest_id,
+      playerId: row.player_id || null,
+      playerDisplayName: row.player_display_name || null,
       createdAt: toIso(row.created_at),
       levelNumber: Number(row.level_number),
       score: Number(row.score),
@@ -135,10 +139,12 @@ async function getReplay(id) {
 
   const result = await database.getPool().query(
     `
-      SELECT id, guest_id, created_at, level_number, score, kills,
-        game_result, duration_ticks, validation_status, replay_json
-      FROM battlecity_replays
-      WHERE id = $1
+      SELECT r.id, r.guest_id, r.player_id, r.created_at, r.level_number,
+        r.score, r.kills, r.game_result, r.duration_ticks, r.validation_status,
+        r.replay_json, p.display_name AS player_display_name
+      FROM battlecity_replays r
+      LEFT JOIN battlecity_players p ON p.id = r.player_id
+      WHERE r.id = $1
       LIMIT 1
     `,
     [id],
@@ -151,6 +157,8 @@ async function getReplay(id) {
   return {
     id: row.id,
     guestId: row.guest_id,
+    playerId: row.player_id || null,
+    playerDisplayName: row.player_display_name || null,
     createdAt: toIso(row.created_at),
     levelNumber: Number(row.level_number),
     score: Number(row.score),
