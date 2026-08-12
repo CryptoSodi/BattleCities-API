@@ -55,9 +55,10 @@ async function readRecord(id, guestId) {
   return readFileRecord(id, guestId);
 }
 
-async function createRecord(guestId, replay, playerId = null) {
+async function createRecord(guestId, replay, playerId = null, options = {}) {
   normalizeReplay(replay);
   const metadata = normalizeMetadata(replay.metadata);
+  const sessionOptions = normalizeSessionOptions(options);
 
   const record = {
     id: createReplayId(),
@@ -71,15 +72,31 @@ async function createRecord(guestId, replay, playerId = null) {
     durationTicks: metadata.durationTicks,
     replay,
     validationStatus: 'pending',
+    singlePlayerSessionId: sessionOptions.sessionId,
+    session: null,
   };
 
   if (hasPersistentConfig()) {
-    const createdRecord = await createPersistentRecord(record);
-    return verifyRecord(createdRecord.id, createdRecord.guestId) || createdRecord;
+    const createdRecord = await createPersistentRecord(record, sessionOptions);
+    const verifiedRecord = await verifyRecord(
+      createdRecord.id,
+      createdRecord.guestId,
+    );
+    return {
+      ...(verifiedRecord || createdRecord),
+      session: createdRecord.session,
+    };
   }
 
+  record.singlePlayerSessionId =
+    sessionOptions.sessionId || createSinglePlayerSessionId();
+  record.session = createFileSessionSummary(record, sessionOptions.completeSession);
   const createdRecord = await createFileRecord(record);
-  return verifyRecord(createdRecord.id, createdRecord.guestId) || createdRecord;
+  const verifiedRecord = await verifyRecord(createdRecord.id, createdRecord.guestId);
+  return {
+    ...(verifiedRecord || createdRecord),
+    session: createdRecord.session,
+  };
 }
 
 async function listPersistentSummaries(guestId) {
@@ -88,7 +105,7 @@ async function listPersistentSummaries(guestId) {
   const result = await getPgPool().query(
     `
       SELECT id, player_id, created_at, level_number, score, kills, game_result,
-        duration_ticks, validation_status
+        duration_ticks, validation_status, single_player_session_id
       FROM ${TABLE_NAME}
       WHERE guest_id = $1
       ORDER BY created_at DESC
@@ -107,6 +124,7 @@ async function listPersistentSummaries(guestId) {
     gameResult: row.game_result,
     durationTicks: row.duration_ticks,
     validationStatus: row.validation_status,
+    singlePlayerSessionId: row.single_player_session_id || null,
   }));
 }
 
@@ -123,8 +141,8 @@ async function readRecordAdmin(id) {
     await ensureSchema();
     const result = await getPgPool().query(
       `
-        SELECT id, guest_id, player_id, created_at, level_number, score, kills,
-          game_result, duration_ticks, validation_status
+      SELECT id, guest_id, player_id, created_at, level_number, score, kills,
+          game_result, duration_ticks, validation_status, single_player_session_id
         FROM ${TABLE_NAME}
         WHERE id = $1
         LIMIT 1
@@ -148,6 +166,7 @@ async function readRecordAdmin(id) {
       gameResult: row.game_result,
       durationTicks: row.duration_ticks,
       validationStatus: row.validation_status,
+      singlePlayerSessionId: row.single_player_session_id || null,
       replay: null,
     };
   }
@@ -167,7 +186,8 @@ async function readPersistentRecord(id, guestId) {
   const result = await getPgPool().query(
     `
       SELECT id, guest_id, player_id, created_at, level_number, score, kills,
-        game_result, duration_ticks, replay_json, validation_status
+        game_result, duration_ticks, replay_json, validation_status,
+        single_player_session_id
       FROM ${TABLE_NAME}
       WHERE id = $1
         AND guest_id = $2
@@ -197,20 +217,25 @@ async function readPersistentRecord(id, guestId) {
     gameResult: row.game_result,
     durationTicks: row.duration_ticks,
     validationStatus: row.validation_status,
+    singlePlayerSessionId: row.single_player_session_id || null,
     replay,
   };
 }
 
-async function createPersistentRecord(record) {
+async function createPersistentRecord(record, sessionOptions) {
   await ensureSchema();
 
-  await getPgPool().query(
+  return database.withTransaction(async () => {
+    const session = await resolvePersistentSession(record, sessionOptions);
+    record.singlePlayerSessionId = session.id;
+
+    await getPgPool().query(
     `
       INSERT INTO ${TABLE_NAME}
         (id, guest_id, player_id, created_at, level_number, replay_json,
           score, kills, game_result, duration_ticks,
-          validation_status)
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+          validation_status, single_player_session_id)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12)
     `,
     [
       record.id,
@@ -224,12 +249,73 @@ async function createPersistentRecord(record) {
       record.gameResult,
       record.durationTicks,
       record.validationStatus,
+      record.singlePlayerSessionId,
     ],
   );
 
-  await prunePersistentRecords(record.guestId);
+    const completeSession = sessionOptions.completeSession;
+    const updated = await getPgPool().query(
+      `
+        UPDATE battlecity_single_player_sessions
+        SET stage_count = stage_count + 1,
+          last_stage_number = $2,
+          status = CASE WHEN $3 THEN 'completed' ELSE status END,
+          completed_at = CASE WHEN $3 THEN NOW() ELSE completed_at END,
+          final_score = CASE WHEN $3 THEN $4 ELSE final_score END,
+          final_result = CASE WHEN $3 THEN $5 ELSE final_result END
+        WHERE id = $1
+        RETURNING id, status, started_at, completed_at, stage_count,
+          last_stage_number, final_score, final_result
+      `,
+      [
+        session.id,
+        record.levelNumber,
+        completeSession,
+        record.score,
+        record.gameResult,
+      ],
+    );
+    record.session = toSessionSummary(updated.rows[0]);
 
-  return record;
+    await prunePersistentRecords(record.guestId);
+    return record;
+  });
+}
+
+async function resolvePersistentSession(record, options) {
+  if (options.sessionId !== null) {
+    const result = await getPgPool().query(
+      `
+        SELECT id, status, started_at, completed_at, stage_count,
+          last_stage_number, final_score, final_result
+        FROM battlecity_single_player_sessions
+        WHERE id = $1 AND guest_id = $2
+        LIMIT 1
+      `,
+      [options.sessionId, record.guestId],
+    );
+    const existing = result.rows[0];
+    if (existing === undefined || existing.status !== 'active') {
+      throw new Error('Single-player session is unavailable');
+    }
+    return existing;
+  }
+
+  const session = {
+    id: createSinglePlayerSessionId(),
+    guestId: record.guestId,
+    playerId: record.playerId || null,
+  };
+  const result = await getPgPool().query(
+    `
+      INSERT INTO battlecity_single_player_sessions (id, guest_id, player_id)
+      VALUES ($1, $2, $3)
+      RETURNING id, status, started_at, completed_at, stage_count,
+        last_stage_number, final_score, final_result
+    `,
+    [session.id, session.guestId, session.playerId],
+  );
+  return result.rows[0];
 }
 
 async function updatePersistentValidationStatus(id, guestId, validationStatus) {
@@ -387,6 +473,27 @@ function toSummary(record) {
     gameResult: record.gameResult || 'loss',
     durationTicks: record.durationTicks || 0,
     matchStatus: record.validationStatus || 'pending',
+    singlePlayerSessionId: record.singlePlayerSessionId || null,
+  };
+}
+
+function toSessionSummary(session) {
+  if (session === null || session === undefined) {
+    return null;
+  }
+  return {
+    id: session.id,
+    status: session.status,
+    startedAt: new Date(session.started_at || session.startedAt).toISOString(),
+    completedAt:
+      session.completed_at || session.completedAt
+        ? new Date(session.completed_at || session.completedAt).toISOString()
+        : null,
+    stageCount: Number(session.stage_count ?? session.stageCount ?? 0),
+    lastStageNumber:
+      session.last_stage_number ?? session.lastStageNumber ?? null,
+    finalScore: session.final_score ?? session.finalScore ?? null,
+    finalResult: session.final_result ?? session.finalResult ?? null,
   };
 }
 
@@ -409,6 +516,34 @@ function createReplayId() {
   return `${Date.now().toString(36)}-${Math.floor(
     Math.random() * 0xffffff,
   ).toString(36)}`;
+}
+
+function createSinglePlayerSessionId() {
+  return `spr-${Date.now().toString(36)}-${Math.floor(
+    Math.random() * 0xffffff,
+  ).toString(36)}`;
+}
+
+function normalizeSessionOptions(value) {
+  const sessionId = isSafeId(value?.sessionId) ? value.sessionId : null;
+  return {
+    sessionId,
+    completeSession: value?.completeSession === true,
+  };
+}
+
+function createFileSessionSummary(record, completeSession) {
+  const startedAt = record.createdAt;
+  return {
+    id: record.singlePlayerSessionId,
+    status: completeSession ? 'completed' : 'active',
+    startedAt,
+    completedAt: completeSession ? startedAt : null,
+    stageCount: 1,
+    lastStageNumber: record.levelNumber,
+    finalScore: completeSession ? record.score : null,
+    finalResult: completeSession ? record.gameResult : null,
+  };
 }
 
 function isValidGuestId(value) {
@@ -570,4 +705,5 @@ module.exports = {
   readRecordAdmin,
   verifyRecord,
   toSummary,
+  toSessionSummary,
 };

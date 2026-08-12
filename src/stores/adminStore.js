@@ -99,13 +99,39 @@ async function listReplays(options = {}) {
   const offset = clampInteger(options.offset, 0, 100000, 0);
   const result = await database.getPool().query(
     `
-      SELECT r.id, r.guest_id, r.player_id, r.created_at, r.level_number,
-        r.score, r.kills, r.game_result, r.duration_ticks, r.validation_status,
-        p.display_name AS player_display_name,
+      SELECT
+        COALESCE(s.id, r.id) AS id,
+        r.guest_id,
+        MAX(r.player_id) AS player_id,
+        MAX(p.display_name) AS player_display_name,
+        MIN(r.created_at) AS started_at,
+        MAX(r.created_at) AS saved_at,
+        COALESCE(s.status, 'completed') AS status,
+        COALESCE(s.final_score, (ARRAY_AGG(r.score ORDER BY r.created_at DESC))[1]) AS final_score,
+        COALESCE(s.final_result, (ARRAY_AGG(r.game_result ORDER BY r.created_at DESC))[1]) AS final_result,
+        COALESCE(s.completed_at, MAX(r.created_at)) AS completed_at,
+        COALESCE(s.stage_count, COUNT(r.id)) AS stage_count,
+        COALESCE(SUM(r.duration_ticks), 0) AS duration_ticks,
+        JSONB_AGG(
+          JSONB_BUILD_OBJECT(
+            'id', r.id,
+            'levelNumber', r.level_number,
+            'score', r.score,
+            'kills', r.kills,
+            'gameResult', r.game_result,
+            'durationTicks', r.duration_ticks,
+            'createdAt', r.created_at
+          )
+          ORDER BY r.level_number ASC, r.created_at ASC
+        ) AS stages,
         COUNT(*) OVER()::INTEGER AS total_count
       FROM battlecity_replays r
+      LEFT JOIN battlecity_single_player_sessions s
+        ON s.id = r.single_player_session_id
       LEFT JOIN battlecity_players p ON p.id = r.player_id
-      ORDER BY r.created_at DESC
+      GROUP BY COALESCE(s.id, r.id), r.guest_id, s.status, s.final_score,
+        s.final_result, s.completed_at, s.stage_count
+      ORDER BY MAX(r.created_at) DESC
       LIMIT $1 OFFSET $2
     `,
     [limit, offset],
@@ -116,13 +142,23 @@ async function listReplays(options = {}) {
       guestId: row.guest_id,
       playerId: row.player_id || null,
       playerDisplayName: row.player_display_name || null,
-      createdAt: toIso(row.created_at),
-      levelNumber: Number(row.level_number),
-      score: Number(row.score),
-      kills: Number(row.kills),
-      gameResult: row.game_result,
-      durationTicks: Number(row.duration_ticks),
-      validationStatus: row.validation_status,
+      startedAt: toIso(row.started_at),
+      completedAt: toIso(row.completed_at),
+      savedAt: toIso(row.saved_at),
+      status: row.status,
+      score: Number(row.final_score || 0),
+      gameResult: row.final_result || 'loss',
+      stageCount: Number(row.stage_count || 0),
+      durationTicks: Number(row.duration_ticks || 0),
+      stages: Array.isArray(row.stages) ? row.stages.map((stage) => ({
+        id: stage.id,
+        levelNumber: Number(stage.levelNumber),
+        score: Number(stage.score),
+        kills: Number(stage.kills),
+        gameResult: stage.gameResult,
+        durationTicks: Number(stage.durationTicks),
+        createdAt: toIso(stage.createdAt),
+      })) : [],
     })),
     total: result.rowCount > 0 ? Number(result.rows[0].total_count) : 0,
     limit,

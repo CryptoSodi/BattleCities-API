@@ -61,11 +61,18 @@ export async function POST(request: Request): Promise<Response> {
     replayGuest.guestId,
     body.replay,
     playerId,
+    {
+      sessionId: body.sessionId,
+      completeSession: body.completeSession === true,
+    },
   );
 
   return json(
     request,
-    { item: replayStore.toSummary(record) },
+    {
+      item: replayStore.toSummary(record),
+      session: replayStore.toSessionSummary(record.session),
+    },
     201,
     replayGuest.setCookie,
   );
