@@ -26,13 +26,13 @@ export async function GET(
   }
 
   if (matchResultId !== null) {
-    const replay = await matchResultStore.getPublicPlayerReplay(
+    const replays = await matchResultStore.getPublicPlayerReplay(
       player.id,
       matchResultId,
     );
-    return replay === null
+    return replays === null
       ? createJsonResponse(request, { error: 'Replay not found' }, 404)
-      : createJsonResponse(request, { item: { replay } });
+      : createJsonResponse(request, { item: { replays } });
   }
 
   const currentSeason = await seasonStore.getCurrentSeason();

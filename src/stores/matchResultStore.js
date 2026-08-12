@@ -376,7 +376,7 @@ async function getPublicPlayerReplay(playerId, resultId) {
   await ensureSchema();
   const result = await getPgPool().query(
     `
-      SELECT r.replay_json
+      SELECT r.replay_json, r.single_player_session_id
       FROM ${TABLE_NAME} m
       JOIN battlecity_replays r ON r.id = m.replay_id
       WHERE m.id = $1
@@ -386,8 +386,27 @@ async function getPublicPlayerReplay(playerId, resultId) {
     `,
     [resultId, playerId],
   );
-  const replay = result.rows[0]?.replay_json;
-  return typeof replay === 'object' && replay !== null ? replay : null;
+  const source = result.rows[0];
+  if (typeof source?.replay_json !== 'object' || source.replay_json === null) {
+    return null;
+  }
+  if (typeof source.single_player_session_id !== 'string') {
+    return [source.replay_json];
+  }
+  const stages = await getPgPool().query(
+    `
+      SELECT replay_json
+      FROM battlecity_replays
+      WHERE single_player_session_id = $1
+        AND player_id = $2
+      ORDER BY level_number ASC, created_at ASC
+    `,
+    [source.single_player_session_id, playerId],
+  );
+  const replays = stages.rows
+    .map((row) => row.replay_json)
+    .filter((replay) => typeof replay === 'object' && replay !== null);
+  return replays.length > 0 ? replays : [source.replay_json];
 }
 
 async function aggregateFileResults(scopeSeasonId) {
