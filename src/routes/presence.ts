@@ -7,6 +7,8 @@ import {
 } from './_helpers';
 
 const presenceStore = require('../stores/presenceStore');
+const presenceIdentity = require('../services/presenceIdentity');
+const rateLimiter = require('../services/rateLimiter');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -22,11 +24,18 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const player = await resolveSessionPlayer(request);
-  if (player === null) {
-    return createJsonResponse(request, { ok: false, error: 'Not logged in' }, 401);
+  const cookieHeader = request.headers.get('cookie') || '';
+  const existingVisitorId = presenceIdentity.resolveVisitorId(cookieHeader);
+  const rateLimitKey = existingVisitorId || getRequestAddress(request);
+  if (!rateLimiter.allow('presence-heartbeat', rateLimitKey)) {
+    return createJsonResponse(
+      request,
+      { ok: false, error: 'Too many requests' },
+      429,
+    );
   }
 
+  const player = await resolveSessionPlayer(request);
   let body: any;
   try {
     body = await request.json();
@@ -34,17 +43,50 @@ export async function POST(request: Request): Promise<Response> {
     return createJsonResponse(request, { ok: false, error: 'Invalid JSON' }, 400);
   }
 
-  await presenceStore.recordPresence(player.id, {
-    inGame: body?.inGame === true,
+  const visitorId = existingVisitorId || presenceIdentity.createVisitorId();
+  const clientId = normalizeClientId(body?.clientId);
+  await presenceStore.recordPresence(visitorId, clientId, {
+    playerId: player?.id,
+    inGame: player !== null && body?.inGame === true,
     gameMode: body?.gameMode,
   });
-  return createJsonResponse(request, { ok: true });
+  return createJsonResponse(
+    request,
+    { ok: true, ...(await presenceStore.getCounts()) },
+    200,
+    existingVisitorId === null
+      ? presenceIdentity.createPresenceCookie(
+          visitorId,
+          request.headers.get('origin'),
+        )
+      : null,
+  );
 }
 
 export async function DELETE(request: Request): Promise<Response> {
-  const player = await resolveSessionPlayer(request);
-  if (player !== null) {
-    await presenceStore.removePresence(player.id);
+  const visitorId = presenceIdentity.resolveVisitorId(
+    request.headers.get('cookie') || '',
+  );
+  const clientId = normalizeClientId(
+    new URL(request.url).searchParams.get('clientId'),
+  );
+  if (visitorId !== null) {
+    await presenceStore.removePresence(visitorId, clientId);
   }
   return createJsonResponse(request, { ok: true });
+}
+
+function normalizeClientId(value: unknown): string {
+  return typeof value === 'string' && /^[a-z0-9-]{6,80}$/i.test(value)
+    ? value
+    : 'legacy';
+}
+
+function getRequestAddress(request: Request): string {
+  return (
+    request.headers.get('cf-connecting-ip') ||
+    request.headers.get('x-real-ip') ||
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  );
 }

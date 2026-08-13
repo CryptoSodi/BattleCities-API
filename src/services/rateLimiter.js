@@ -12,6 +12,7 @@ const LIMITS = {
   'quest-claim': { max: 20, windowMs: 60 * 1000 },
   'discord-verification-code': { max: 5, windowMs: 60 * 1000 },
   'staking-action': { max: 20, windowMs: 60 * 1000 },
+  'presence-heartbeat': { max: 120, windowMs: 60 * 1000 },
 };
 
 // Returns true when the call is allowed; false when the caller should get 429.

@@ -3,8 +3,10 @@ const path = require('path');
 const storageConfig = require('../config/storageConfig');
 const database = require('../database');
 
-const TABLE_NAME = 'battlecity_player_presence';
+const TABLE_NAME = 'battlecity_site_presence';
 const PRESENCE_WINDOW_SECONDS = 90;
+const STALE_RECORD_SECONDS = 60 * 60 * 24;
+let lastPrunedAt = 0;
 
 function getFilePath() {
   return (
@@ -25,51 +27,67 @@ async function ensureSchema() {
   await database.assertMigrationsApplied();
 }
 
-async function recordPresence(playerId, input = {}) {
-  if (!isValidPlayerId(playerId)) {
-    throw new Error('Invalid player ID');
-  }
+async function recordPresence(visitorId, clientId, input = {}) {
+  validateIdentity(visitorId, clientId);
 
-  const inGame = input.inGame === true;
+  const playerId = isValidPlayerId(input.playerId) ? input.playerId : null;
+  const inGame = playerId !== null && input.inGame === true;
   const gameMode = inGame ? normalizeGameMode(input.gameMode) : null;
   const lastSeenAt = new Date().toISOString();
 
   if (hasPersistentConfig()) {
     await ensureSchema();
+    await prunePersistentRecords();
     await getPgPool().query(
       `
-        INSERT INTO ${TABLE_NAME} (player_id, in_game, game_mode, last_seen_at)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (player_id) DO UPDATE SET
+        INSERT INTO ${TABLE_NAME} (
+          visitor_id,
+          client_id,
+          player_id,
+          in_game,
+          game_mode,
+          last_seen_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (visitor_id, client_id) DO UPDATE SET
+          player_id = EXCLUDED.player_id,
           in_game = EXCLUDED.in_game,
           game_mode = EXCLUDED.game_mode,
           last_seen_at = EXCLUDED.last_seen_at
       `,
-      [playerId, inGame, gameMode, lastSeenAt],
+      [visitorId, clientId, playerId, inGame, gameMode, lastSeenAt],
     );
     return;
   }
 
   const records = await readLocalRecords();
-  records[playerId] = { playerId, inGame, gameMode, lastSeenAt };
-  await writeLocalRecords(records);
+  records[getRecordKey(visitorId, clientId)] = {
+    visitorId,
+    clientId,
+    playerId,
+    inGame,
+    gameMode,
+    lastSeenAt,
+  };
+  await writeLocalRecords(pruneLocalRecords(records));
 }
 
-async function removePresence(playerId) {
-  if (!isValidPlayerId(playerId)) {
+async function removePresence(visitorId, clientId) {
+  if (!isValidVisitorId(visitorId) || !isValidClientId(clientId)) {
     return;
   }
 
   if (hasPersistentConfig()) {
     await ensureSchema();
-    await getPgPool().query(`DELETE FROM ${TABLE_NAME} WHERE player_id = $1`, [
-      playerId,
-    ]);
+    await getPgPool().query(
+      `DELETE FROM ${TABLE_NAME} WHERE visitor_id = $1 AND client_id = $2`,
+      [visitorId, clientId],
+    );
     return;
   }
 
   const records = await readLocalRecords();
-  delete records[playerId];
+  delete records[getRecordKey(visitorId, clientId)];
   await writeLocalRecords(records);
 }
 
@@ -80,32 +98,54 @@ async function getCounts() {
 
   if (hasPersistentConfig()) {
     await ensureSchema();
+    await prunePersistentRecords();
     const result = await getPgPool().query(
       `
         SELECT
-          COUNT(*)::INTEGER AS online,
-          COUNT(*) FILTER (WHERE in_game)::INTEGER AS in_game
+          COUNT(DISTINCT visitor_id)::INTEGER AS online,
+          COUNT(DISTINCT visitor_id) FILTER (WHERE in_game)::INTEGER AS in_game
         FROM ${TABLE_NAME}
         WHERE last_seen_at >= $1
       `,
       [cutoff],
     );
-    return {
-      online: Number(result.rows[0]?.online || 0),
-      inGame: Number(result.rows[0]?.in_game || 0),
-      windowSeconds: PRESENCE_WINDOW_SECONDS,
-    };
+    return formatCounts(result.rows[0]?.online, result.rows[0]?.in_game);
   }
 
-  const records = await readLocalRecords();
-  const active = Object.values(records).filter((record) => {
-    return Date.parse(record.lastSeenAt) >= Date.parse(cutoff);
+  const active = Object.values(await readLocalRecords()).filter((record) => {
+    return (
+      isValidVisitorId(record.visitorId) &&
+      Date.parse(record.lastSeenAt) >= Date.parse(cutoff)
+    );
   });
-  return {
-    online: active.length,
-    inGame: active.filter((record) => record.inGame === true).length,
-    windowSeconds: PRESENCE_WINDOW_SECONDS,
-  };
+  const onlineVisitors = new Set(active.map((record) => record.visitorId));
+  const inGameVisitors = new Set(
+    active
+      .filter((record) => record.inGame === true)
+      .map((record) => record.visitorId),
+  );
+  return formatCounts(onlineVisitors.size, inGameVisitors.size);
+}
+
+async function prunePersistentRecords() {
+  const now = Date.now();
+  if (now - lastPrunedAt < 60 * 60 * 1000) {
+    return;
+  }
+  lastPrunedAt = now;
+  await getPgPool().query(
+    `DELETE FROM ${TABLE_NAME} WHERE last_seen_at < NOW() - ($1 * INTERVAL '1 second')`,
+    [STALE_RECORD_SECONDS],
+  );
+}
+
+function pruneLocalRecords(records) {
+  const cutoff = Date.now() - STALE_RECORD_SECONDS * 1000;
+  return Object.fromEntries(
+    Object.entries(records).filter(([, record]) => {
+      return Date.parse(record.lastSeenAt) >= cutoff;
+    }),
+  );
 }
 
 async function readLocalRecords() {
@@ -125,8 +165,37 @@ async function writeLocalRecords(records) {
   await fs.writeFile(getFilePath(), JSON.stringify(records), 'utf8');
 }
 
+function formatCounts(online, inGame) {
+  return {
+    online: Number(online || 0),
+    inGame: Number(inGame || 0),
+    windowSeconds: PRESENCE_WINDOW_SECONDS,
+  };
+}
+
 function normalizeGameMode(value) {
   return value === 'multiplayer' ? 'multiplayer' : 'single-player';
+}
+
+function getRecordKey(visitorId, clientId) {
+  return `${visitorId}:${clientId}`;
+}
+
+function validateIdentity(visitorId, clientId) {
+  if (!isValidVisitorId(visitorId)) {
+    throw new Error('Invalid visitor ID');
+  }
+  if (!isValidClientId(clientId)) {
+    throw new Error('Invalid presence client ID');
+  }
+}
+
+function isValidVisitorId(value) {
+  return typeof value === 'string' && /^visitor-[a-f0-9]{32}$/.test(value);
+}
+
+function isValidClientId(value) {
+  return typeof value === 'string' && /^[a-z0-9-]{6,80}$/i.test(value);
 }
 
 function isValidPlayerId(value) {

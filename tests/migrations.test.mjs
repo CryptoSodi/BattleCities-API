@@ -137,6 +137,17 @@ test('presence migration stores fresh online and in-game state per player', asyn
   assert.match(sql, /last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW\(\)/);
 });
 
+test('site presence migration supports anonymous visitors and multiple tabs', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/016_site_visitor_presence.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_site_presence\b/);
+  assert.match(sql, /PRIMARY KEY \(visitor_id, client_id\)/);
+  assert.match(sql, /player_id TEXT REFERENCES battlecity_players\(id\) ON DELETE SET NULL/);
+  assert.match(sql, /DROP TABLE battlecity_player_presence/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

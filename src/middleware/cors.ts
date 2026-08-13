@@ -7,6 +7,7 @@ function isAllowedOrigin(origin: string | null): boolean {
     const url = new URL(origin);
     const host = url.hostname.toLowerCase();
     const cloudflarePagesHost = 'battlecities-web.pages.dev';
+    const githubPagesTestHost = 'cryptosodi.github.io';
 
     return (
       host === 'localhost' ||
@@ -15,6 +16,7 @@ function isAllowedOrigin(origin: string | null): boolean {
       host.endsWith('.battlecities.com') ||
       host === 'battlecities.com' ||
       host === 'www.battlecities.com' ||
+      host === githubPagesTestHost ||
       host === cloudflarePagesHost ||
       host.endsWith(`.${cloudflarePagesHost}`) ||
       isPrivateIp(host)
