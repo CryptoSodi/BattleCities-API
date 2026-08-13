@@ -33,13 +33,6 @@ function getPlayerPath(id) {
   return path.join(getDataDir(), `${id}.json`);
 }
 
-async function createGuestPlayer() {
-  return createPlayer({
-    provider: 'guest',
-    displayName: 'Guest Player',
-  });
-}
-
 async function findOrCreateWalletPlayer(walletAddress) {
   if (!isValidWalletAddress(walletAddress)) {
     throw new Error('Invalid wallet address');
@@ -109,7 +102,8 @@ async function readPlayer(id) {
       return null;
     }
 
-    return fromRow(result.rows[0]);
+    const player = fromRow(result.rows[0]);
+    return isValidPlayer(player) ? player : null;
   }
 
   try {
@@ -382,9 +376,7 @@ function isValidPlayer(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidPlayerId(value.id) &&
-    (value.provider === 'guest' ||
-      value.provider === 'wallet' ||
-      value.provider === 'google') &&
+    (value.provider === 'wallet' || value.provider === 'google') &&
     typeof value.displayName === 'string' &&
     typeof value.createdAt === 'string' &&
     typeof value.updatedAt === 'string' &&
@@ -414,7 +406,6 @@ function isValidWalletAddress(value) {
 }
 
 module.exports = {
-  createGuestPlayer,
   findOrCreateGooglePlayer,
   findOrCreateWalletPlayer,
   isPersistentStoreConfigured: hasPersistentConfig,

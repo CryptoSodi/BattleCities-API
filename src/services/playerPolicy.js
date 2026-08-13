@@ -1,21 +1,16 @@
-// Who counts as a REAL player vs a VIRTUAL one.
-//
-// Guest accounts are throwaway identities with unlimited fuel/items (see
-// economyStore's guest provisioning) — they exist so anyone can try the full
-// game instantly. That makes them meaningless as competitors and dangerous as
-// economic actors, so they are fenced off server-side:
-//   - their match results never enter leaderboards or rank calculations,
-//   - they cannot claim quest rewards, stake, record trading volume, or hold
-//     airdrop eligibility/allocations.
-// Wallet and Google logins are real players.
+// Only wallet and Google identities may act as API players. Keep this guard at
+// economic/ranking boundaries even though the session store enforces the same
+// provider allow-list.
 
 function isVirtualPlayer(player) {
   return (
-    typeof player !== 'object' || player === null || player.provider === 'guest'
+    typeof player !== 'object' ||
+    player === null ||
+    (player.provider !== 'wallet' && player.provider !== 'google')
   );
 }
 
 const VIRTUAL_PLAYER_MESSAGE =
-  'Guest accounts are unranked - log in with a wallet or Google to compete';
+  'A wallet or Google account is required for this action';
 
 module.exports = { isVirtualPlayer, VIRTUAL_PLAYER_MESSAGE };

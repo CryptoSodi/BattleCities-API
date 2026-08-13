@@ -91,15 +91,14 @@ async function resolveMe(
     return null;
   }
 
-  // Guests are virtual players — permanently unranked; the client shows a
-  // "log in to compete" state instead of a rank.
+  // Unsupported identities are permanently unranked.
   if (playerPolicy.isVirtualPlayer(player)) {
     return {
       displayName: player.displayName,
       rank: null,
       totalPoints: 0,
       matches: 0,
-      guest: true,
+      restricted: true,
     };
   }
 

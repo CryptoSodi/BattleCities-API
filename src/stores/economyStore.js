@@ -5,10 +5,8 @@ const database = require('../database');
 const ledgerStore = require('./ledgerStore');
 
 const TABLE_NAME = 'battlecity_economy_accounts';
-const MAX_GUEST_INVENTORY_COUNT = 99;
 const SHOP_STARTING_TOKEN_BALANCE = 1000;
 const SHOP_STARTING_SOL_BALANCE = 1.25;
-const SHOP_GUEST_FUEL_BALANCE = 9999;
 const SHOP_CATALOG = {
   'fuel-one': { price: 10, solPrice: 0.01, fuel: 1 },
   'fuel-five': { price: 45, solPrice: 0.04, fuel: 5 },
@@ -38,6 +36,15 @@ const INVENTORY_KEYS = [
   'wipeout',
   'extra-life',
 ];
+const ACTIVE_POWERUP_TYPES = {
+  shield: 'shield',
+  'base-defence': 'defence',
+  freeze: 'freeze',
+  speed: 'speed',
+  upgrade: 'upgrade',
+  'zoom-out': 'zoomout',
+  wipeout: 'wipeout',
+};
 
 function getDataDir() {
   return (
@@ -118,15 +125,14 @@ async function ensureAccountForPlayer(player) {
   }
 
   const now = new Date().toISOString();
-  const isGuest = player.provider === 'guest';
   const account = normalizeAccount({
     playerId: player.id,
     provider: player.provider,
     walletAddress: player.walletAddress || null,
     tokenBalance: SHOP_STARTING_TOKEN_BALANCE,
     solBalance: SHOP_STARTING_SOL_BALANCE,
-    fuelBalance: isGuest ? SHOP_GUEST_FUEL_BALANCE : 0,
-    inventory: isGuest ? createGuestInventory() : {},
+    fuelBalance: 0,
+    inventory: {},
     loadout: {},
     createdAt: now,
     updatedAt: now,
@@ -196,6 +202,90 @@ async function purchaseItemForPlayer(player, itemId, currency) {
     txHash,
     account: toPublicAccount(account),
   };
+}
+
+async function consumePowerupForPlayer(
+  player,
+  itemId,
+  expectedPowerupType,
+  requestId,
+) {
+  if (!isValidPlayer(player)) {
+    throw new Error('Invalid player');
+  }
+
+  const powerupType = ACTIVE_POWERUP_TYPES[itemId];
+  if (powerupType === undefined || powerupType !== expectedPowerupType) {
+    return { ok: false, statusText: 'INVALID POWERUP' };
+  }
+  if (
+    typeof requestId !== 'string' ||
+    !/^[a-z0-9:_-]{8,128}$/i.test(requestId)
+  ) {
+    return { ok: false, statusText: 'INVALID REQUEST' };
+  }
+
+  return database.withTransaction(async () => {
+    const sourceType = 'powerup-consumption';
+    let account = hasPersistentConfig()
+      ? await lockAccountForFuelMutation(player)
+      : await ensureAccountForPlayer(player);
+    const previous = await ledgerStore.findEntryBySource(
+      player.id,
+      sourceType,
+      requestId,
+    );
+
+    if (previous !== null) {
+      const samePowerup = previous.currency === `item:${itemId}`;
+      return {
+        ok: samePowerup,
+        statusText: samePowerup ? 'POWERUP APPROVED' : 'REQUEST ALREADY USED',
+        powerupType,
+        idempotent: true,
+        account: toPublicAccount(account),
+      };
+    }
+
+    if ((account.inventory[itemId] || 0) <= 0) {
+      return {
+        ok: false,
+        statusText: 'POWERUP NOT OWNED',
+        powerupType,
+        account: toPublicAccount(account),
+      };
+    }
+
+    account.inventory[itemId] -= 1;
+    if (account.inventory[itemId] <= 0) {
+      account.inventory[itemId] = 0;
+      Object.keys(account.loadout).forEach((slot) => {
+        if (account.loadout[slot] === itemId) {
+          delete account.loadout[slot];
+        }
+      });
+    }
+    account.updatedAt = new Date().toISOString();
+    await writeAccount(account);
+    await ledgerStore.appendEntries({
+      playerId: player.id,
+      walletAddress: player.walletAddress || null,
+      currency: `item:${itemId}`,
+      amount: -1,
+      reason: 'powerup-consumed',
+      sourceType,
+      sourceId: requestId,
+    });
+
+    return {
+      ok: true,
+      statusText: 'POWERUP APPROVED',
+      powerupType,
+      consumed: true,
+      remaining: account.inventory[itemId],
+      account: toPublicAccount(account),
+    };
+  });
 }
 
 // Every purchase is auditable: one debit entry for the price paid, plus one
@@ -283,47 +373,41 @@ async function debitFuel(player, amount, context = {}) {
     let account;
     if (hasPersistentConfig()) {
       account = await lockAccountForFuelMutation(player);
-      if (player.provider !== 'guest') {
-        const updated = await getPgPool().query(
-          `
-            UPDATE ${TABLE_NAME}
-            SET fuel_balance = fuel_balance - $2, updated_at = $3
-            WHERE player_id = $1 AND fuel_balance >= $2
-            RETURNING player_id, provider, wallet_address, token_balance,
-              sol_balance, fuel_balance, inventory_json, loadout_json,
-              created_at, updated_at
-          `,
-          [player.id, safeAmount, new Date().toISOString()],
-        );
-        if (updated.rowCount === 0) {
-          return null;
-        }
-        account = normalizeAccount(fromRow(updated.rows[0]));
+      const updated = await getPgPool().query(
+        `
+          UPDATE ${TABLE_NAME}
+          SET fuel_balance = fuel_balance - $2, updated_at = $3
+          WHERE player_id = $1 AND fuel_balance >= $2
+          RETURNING player_id, provider, wallet_address, token_balance,
+            sol_balance, fuel_balance, inventory_json, loadout_json,
+            created_at, updated_at
+        `,
+        [player.id, safeAmount, new Date().toISOString()],
+      );
+      if (updated.rowCount === 0) {
+        return null;
       }
+      account = normalizeAccount(fromRow(updated.rows[0]));
     } else {
       account = await ensureAccountForPlayer(player);
-      if (player.provider !== 'guest') {
-        if (account.fuelBalance < safeAmount) {
-          return null;
-        }
-        account.fuelBalance -= safeAmount;
-        account.updatedAt = new Date().toISOString();
-        await writeAccount(account);
+      if (account.fuelBalance < safeAmount) {
+        return null;
       }
+      account.fuelBalance -= safeAmount;
+      account.updatedAt = new Date().toISOString();
+      await writeAccount(account);
     }
 
-    if (player.provider !== 'guest') {
-      await ledgerStore.appendEntries({
-        playerId: player.id,
-        walletAddress: player.walletAddress || null,
-        currency: 'fuel',
-        amount: -safeAmount,
-        reason: context.reason || 'multiplayer-entry',
-        sourceType: context.sourceType || 'multiplayer-match',
-        sourceId: context.sourceId || null,
-        eventId: context.eventId || null,
-      });
-    }
+    await ledgerStore.appendEntries({
+      playerId: player.id,
+      walletAddress: player.walletAddress || null,
+      currency: 'fuel',
+      amount: -safeAmount,
+      reason: context.reason || 'multiplayer-entry',
+      sourceType: context.sourceType || 'multiplayer-match',
+      sourceId: context.sourceId || null,
+      eventId: context.eventId || null,
+    });
     return account;
   });
 }
@@ -342,41 +426,35 @@ async function creditFuel(player, amount, context = {}) {
     let account;
     if (hasPersistentConfig()) {
       account = await lockAccountForFuelMutation(player);
-      if (player.provider !== 'guest') {
-        const updated = await getPgPool().query(
-          `
-            UPDATE ${TABLE_NAME}
-            SET fuel_balance = fuel_balance + $2, updated_at = $3
-            WHERE player_id = $1
-            RETURNING player_id, provider, wallet_address, token_balance,
-              sol_balance, fuel_balance, inventory_json, loadout_json,
-              created_at, updated_at
-          `,
-          [player.id, safeAmount, new Date().toISOString()],
-        );
-        account = normalizeAccount(fromRow(updated.rows[0]));
-      }
+      const updated = await getPgPool().query(
+        `
+          UPDATE ${TABLE_NAME}
+          SET fuel_balance = fuel_balance + $2, updated_at = $3
+          WHERE player_id = $1
+          RETURNING player_id, provider, wallet_address, token_balance,
+            sol_balance, fuel_balance, inventory_json, loadout_json,
+            created_at, updated_at
+        `,
+        [player.id, safeAmount, new Date().toISOString()],
+      );
+      account = normalizeAccount(fromRow(updated.rows[0]));
     } else {
       account = await ensureAccountForPlayer(player);
-      if (player.provider !== 'guest') {
-        account.fuelBalance += safeAmount;
-        account.updatedAt = new Date().toISOString();
-        await writeAccount(account);
-      }
+      account.fuelBalance += safeAmount;
+      account.updatedAt = new Date().toISOString();
+      await writeAccount(account);
     }
 
-    if (player.provider !== 'guest') {
-      await ledgerStore.appendEntries({
-        playerId: player.id,
-        walletAddress: player.walletAddress || null,
-        currency: 'fuel',
-        amount: safeAmount,
-        reason: context.reason || 'multiplayer-refund',
-        sourceType: context.sourceType || 'multiplayer-match',
-        sourceId: context.sourceId || null,
-        eventId: context.eventId || null,
-      });
-    }
+    await ledgerStore.appendEntries({
+      playerId: player.id,
+      walletAddress: player.walletAddress || null,
+      currency: 'fuel',
+      amount: safeAmount,
+      reason: context.reason || 'multiplayer-refund',
+      sourceType: context.sourceType || 'multiplayer-match',
+      sourceId: context.sourceId || null,
+      eventId: context.eventId || null,
+    });
     return account;
   });
 }
@@ -526,19 +604,11 @@ function normalizeAccount(value) {
 
   return {
     playerId: isValidPlayerId(account.playerId) ? account.playerId : '',
-    provider:
-      account.provider === 'guest' ||
-      account.provider === 'wallet' ||
-      account.provider === 'google'
-        ? account.provider
-        : 'guest',
+    provider: typeof account.provider === 'string' ? account.provider : '',
     walletAddress: typeof account.walletAddress === 'string' ? account.walletAddress : null,
     tokenBalance: normalizeNumber(account.tokenBalance, SHOP_STARTING_TOKEN_BALANCE),
     solBalance: normalizeNumber(account.solBalance, SHOP_STARTING_SOL_BALANCE),
-    fuelBalance: normalizeInteger(
-      account.fuelBalance,
-      account.provider === 'guest' ? SHOP_GUEST_FUEL_BALANCE : 0,
-    ),
+    fuelBalance: normalizeInteger(account.fuelBalance, 0),
     inventory: normalizeObject(account.inventory),
     loadout: normalizeObject(account.loadout),
     createdAt: typeof account.createdAt === 'string' ? account.createdAt : now,
@@ -646,14 +716,6 @@ function normalizeSyncedLoadout(inventory, snapshotLoadout) {
   return nextLoadout;
 }
 
-function createGuestInventory() {
-  const inventory = {};
-  INVENTORY_KEYS.forEach((itemId) => {
-    inventory[itemId] = MAX_GUEST_INVENTORY_COUNT;
-  });
-  return inventory;
-}
-
 function parseJson(value, defaultValue) {
   if (typeof value === 'object' && value !== null) {
     return value;
@@ -728,15 +790,14 @@ function isValidPlayer(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidPlayerId(value.id) &&
-    (value.provider === 'guest' ||
-      value.provider === 'wallet' ||
-      value.provider === 'google')
+    (value.provider === 'wallet' || value.provider === 'google')
   );
 }
 
 module.exports = {
   creditFuel,
   creditRewards,
+  consumePowerupForPlayer,
   debitFuel,
   debitTokens,
   ensureAccountForPlayer,

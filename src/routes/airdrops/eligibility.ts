@@ -30,11 +30,11 @@ export async function GET(request: Request): Promise<Response> {
     return createJsonResponse(request, { authenticated: false }, 401);
   }
 
-  // Guests are virtual players — no airdrop weight, ever.
+  // Unsupported identities never receive airdrop weight.
   if (playerPolicy.isVirtualPlayer(player)) {
     return createJsonResponse(request, {
       authenticated: true,
-      guest: true,
+      restricted: true,
       error: playerPolicy.VIRTUAL_PLAYER_MESSAGE,
       eligibility: null,
     });

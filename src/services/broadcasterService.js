@@ -130,9 +130,7 @@ async function getMatchRuntimeOptions(matchId) {
     category:
       match?.category === 'event'
         ? 'event'
-        : accountsBySlot.every((account) => account?.provider === 'guest')
-          ? 'guest'
-          : 'live',
+        : 'live',
     players: players.map((player) => ({
       playerId: player.playerId,
       displayName: player.displayName || 'Player',

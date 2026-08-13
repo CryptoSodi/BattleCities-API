@@ -34,13 +34,6 @@ function getSessionPath(id) {
   return path.join(getDataDir(), `${id}.json`);
 }
 
-async function createGuestSession() {
-  const player = await playerStore.createGuestPlayer();
-  return createSession('guest', {
-    playerId: player.id,
-  });
-}
-
 async function createWalletSession(walletAddress) {
   if (!isValidWalletAddress(walletAddress)) {
     throw new Error('Invalid wallet address');
@@ -158,6 +151,9 @@ async function readSession(id) {
       googleName: row.google_name,
       googlePicture: row.google_picture,
     };
+    if (!isValidSession(session)) {
+      return null;
+    }
     await touchSession(session.id);
     return session;
   }
@@ -242,9 +238,7 @@ function isValidSession(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidSessionId(value.id) &&
-    (value.provider === 'guest' ||
-      value.provider === 'wallet' ||
-      value.provider === 'google') &&
+    (value.provider === 'wallet' || value.provider === 'google') &&
     typeof value.createdAt === 'string' &&
     typeof value.lastSeenAt === 'string' &&
     (value.walletAddress === null ||
@@ -275,7 +269,6 @@ function isValidWalletAddress(value) {
 }
 
 module.exports = {
-  createGuestSession,
   createGoogleSession,
   createWalletSession,
   deleteSession,

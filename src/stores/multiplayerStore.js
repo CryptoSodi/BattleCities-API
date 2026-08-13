@@ -135,7 +135,7 @@ async function startMatch(
   const matchId = openMatch?.id || createMatchId();
   const playerSlot = openMatch?.playerSlot ?? 0;
   const requestedFuel = category === 'direct' ? directFuelCost : 0;
-  const chargedFuel = player.provider === 'guest' ? 0 : requestedFuel;
+  const chargedFuel = requestedFuel;
 
   if (requestedFuel > 0) {
     const account = await economyStore.debitFuel(player, requestedFuel, {
@@ -485,7 +485,7 @@ async function ensureEventEntry(player, eventId, fuelCost) {
   }
 
   const requestedFuel = Math.max(0, Math.floor(Number(fuelCost) || 0));
-  const chargedFuel = player.provider === 'guest' ? 0 : requestedFuel;
+  const chargedFuel = requestedFuel;
   let account = await economyStore.ensureAccountForPlayer(player);
   if (requestedFuel > 0) {
     account = await economyStore.debitFuel(player, requestedFuel, {
@@ -656,7 +656,7 @@ async function rejoinStagePlayer(
     if (!slotIsOpen) return null;
 
     const requestedFuel = Math.max(0, Math.floor(Number(fuelCost) || 0));
-    const chargedFuel = player.provider === 'guest' ? 0 : requestedFuel;
+  const chargedFuel = requestedFuel;
     if (requestedFuel > 0) {
       const account = await economyStore.debitFuel(player, requestedFuel, {
         reason: 'multiplayer-stage-rejoin',

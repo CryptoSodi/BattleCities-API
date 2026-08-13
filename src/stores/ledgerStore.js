@@ -143,6 +143,37 @@ async function listEntriesForPlayer(playerId, limit = 20) {
     .slice(0, safeLimit);
 }
 
+async function findEntryBySource(playerId, sourceType, sourceId) {
+  if (
+    !isValidPlayerId(playerId) ||
+    typeof sourceType !== 'string' ||
+    typeof sourceId !== 'string'
+  ) {
+    return null;
+  }
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `
+        SELECT id, player_id, wallet_address, currency, amount, reason,
+          source_type, source_id, season_id, phase_id, event_id, created_at
+        FROM ${TABLE_NAME}
+        WHERE player_id = $1 AND source_type = $2 AND source_id = $3
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [playerId, sourceType, sourceId],
+    );
+    return result.rowCount > 0 ? fromRow(result.rows[0]) : null;
+  }
+
+  const entries = await readPlayerEntries(playerId);
+  return entries.find((entry) => {
+    return entry.sourceType === sourceType && entry.sourceId === sourceId;
+  }) || null;
+}
+
 async function readPlayerEntries(playerId) {
   try {
     const raw = await fs.readFile(getPlayerLedgerPath(playerId), 'utf8');
@@ -220,6 +251,7 @@ function isValidPlayerId(value) {
 
 module.exports = {
   appendEntries,
+  findEntryBySource,
   listEntriesForPlayer,
   isPersistentStoreConfigured: hasPersistentConfig,
 };

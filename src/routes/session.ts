@@ -42,12 +42,11 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid JSON' }, 400);
   }
 
-  if (body?.provider !== 'guest' && body?.provider !== 'wallet') {
+  if (body?.provider !== 'wallet') {
     return json(request, { error: 'Unsupported login provider' }, 400);
   }
 
   if (
-    body.provider === 'wallet' &&
     !(await walletAuth.verifyChallenge({
       walletAddress: body.walletAddress,
       nonce: body.nonce,
@@ -58,10 +57,7 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid wallet signature' }, 401);
   }
 
-  const session =
-    body.provider === 'wallet'
-      ? await sessionStore.createWalletSession(body.walletAddress)
-      : await sessionStore.createGuestSession();
+  const session = await sessionStore.createWalletSession(body.walletAddress);
 
   return json(
     request,

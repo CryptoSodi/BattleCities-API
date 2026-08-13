@@ -11,6 +11,7 @@ import * as adminSession from '../routes/admin/session';
 import * as adminTournaments from '../routes/admin/tournaments';
 import * as boostStatus from '../routes/boost/status';
 import * as economyAccount from '../routes/economy/account';
+import * as economyConsumePowerup from '../routes/economy/consume-powerup';
 import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchase from '../routes/economy/purchase';
 import * as events from '../routes/events';
@@ -69,6 +70,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'auth/google/start': googleAuthStart,
   'boost/status': boostStatus,
   'economy/account': economyAccount,
+  'economy/powerups/consume': economyConsumePowerup,
   'economy/ledger': economyLedger,
   'economy/purchase': economyPurchase,
   events,
