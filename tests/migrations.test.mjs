@@ -126,6 +126,17 @@ test('headless target migration constrains persisted runtime selection', async (
   assert.match(removalSql, /'worker', 'bom1'/);
 });
 
+test('presence migration stores fresh online and in-game state per player', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/015_player_presence.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_player_presence\b/);
+  assert.match(sql, /player_id TEXT PRIMARY KEY REFERENCES battlecity_players\(id\)/);
+  assert.match(sql, /in_game BOOLEAN NOT NULL DEFAULT FALSE/);
+  assert.match(sql, /last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW\(\)/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

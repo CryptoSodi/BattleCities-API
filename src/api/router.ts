@@ -30,6 +30,7 @@ import * as multiplayerEvents from '../routes/multiplayer/events';
 import * as multiplayerMatches from '../routes/multiplayer/matches';
 import * as phases from '../routes/phases';
 import * as player from '../routes/player';
+import * as presence from '../routes/presence';
 import * as playerProfile from '../routes/players/profile';
 import * as quests from '../routes/quests';
 import * as questClaim from '../routes/quests/claim';
@@ -85,6 +86,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,
   player,
+  presence,
   quests,
   'quests/claim': questClaim,
   rankings,
