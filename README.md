@@ -50,6 +50,17 @@ Configure `DATABASE_URL`, Google/Discord credentials,
 `/etc/battlecities/api.env`. Use
 `BATTLECITY_DATABASE_POOL_SIZE=2` on the 1 GB server.
 
+For the Cherry chat embed, set both values in this same API-only environment:
+
+```env
+CHERRY_APP_ID=148185d2-9181-4e2f-9e4d-47e5b5c12f2a
+CHERRY_APP_SECRET=<secret created in the Cherry portal>
+```
+
+The secret is used exclusively by `POST /api/cherry-embed-token` to mint
+five-minute tokens for an authenticated wallet; never put it in the browser
+site, a public environment variable, or a commit.
+
 After deployment verify:
 
 ```text
