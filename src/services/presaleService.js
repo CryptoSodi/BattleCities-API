@@ -270,6 +270,16 @@ async function createQuote(input) {
   const remaining = stage.allocationMicros - totals.get(stage.id).soldMicros;
   if (tokenMicros > remaining) throw new Error(`Only ${decimalString(remaining, 6)} BATC remain in ${stage.label}.`);
 
+  let replaceQuoteId = null;
+  if (input?.replaceQuoteToken) {
+    const previousQuote = verifyQuoteToken(input.replaceQuoteToken, config.quoteSecret);
+    validateQuote(previousQuote, config);
+    if (previousQuote.walletAddress !== wallet.toBase58()) {
+      throw new Error('The previous quote belongs to a different wallet.');
+    }
+    replaceQuoteId = previousQuote.id;
+  }
+
   const issuedAt = Date.now();
   const payload = {
     v: 1,
@@ -299,7 +309,7 @@ async function createQuote(input) {
     tokenMicros: payload.tokenMicros,
     stageId: payload.stageId,
     expiresAt: new Date(payload.expiresAt).toISOString(),
-  }, stage.allocationMicros.toString());
+  }, stage.allocationMicros.toString(), replaceQuoteId);
 
   return {
     quoteToken,

@@ -97,13 +97,19 @@ test('local presale store reserves stage capacity and consumes each quote once',
 
   try {
     await presaleStore.reserveQuote(quote, '100');
+    const replacementQuote = {
+      ...quote,
+      quoteId: crypto.randomUUID(),
+      tokenMicros: '60',
+    };
+    await presaleStore.reserveQuote(replacementQuote, '100', quote.quoteId);
     await assert.rejects(
       presaleStore.reserveQuote({ ...quote, quoteId: crypto.randomUUID(), tokenMicros: '50' }, '100'),
       /no longer has enough BATC/,
     );
     const allocation = {
       signature: 'signature-one',
-      ...quote,
+      ...replacementQuote,
       paymentMethod: 'SOL',
       confirmedAt: new Date().toISOString(),
     };
@@ -130,6 +136,14 @@ test('local presale store reserves stage capacity and consumes each quote once',
     assert.equal(duplicatePrepare.deliveryAttempts, 1);
     const delivered = await presaleStore.markDeliveryDelivered('signature-one', 'delivery-one');
     assert.equal(delivered.deliveryStatus, 'delivered');
+    await assert.rejects(
+      presaleStore.reserveQuote(
+        { ...replacementQuote, quoteId: crypto.randomUUID() },
+        '100',
+        replacementQuote.quoteId,
+      ),
+      /cannot be replaced/,
+    );
     const afterDeliveryRetry = await presaleStore.prepareDelivery('signature-one', {
       signature: 'delivery-three',
       rawTransaction: 'third-transaction',

@@ -65,12 +65,23 @@ async function findBySignature(signature) {
   return (await listAllocations()).find((record) => record.signature === signature) || null;
 }
 
-async function reserveQuote(quote, maxStageTokenMicros) {
+async function reserveQuote(quote, maxStageTokenMicros, replaceQuoteId = null) {
   if (hasPersistentStore()) {
     await database.assertMigrationsApplied();
     return database.withTransaction(async () => {
       const pool = database.getPool();
       await pool.query('SELECT pg_advisory_xact_lock($1)', [PRESALE_LOCK_ID]);
+      if (replaceQuoteId) {
+        const replaced = await pool.query(
+          `DELETE FROM ${QUOTES_TABLE_NAME}
+           WHERE quote_id = $1 AND wallet_address = $2 AND consumed_signature IS NULL
+           RETURNING quote_id`,
+          [replaceQuoteId, quote.walletAddress],
+        );
+        if (replaced.rowCount !== 1) {
+          throw new Error('The previous quote cannot be replaced. Refresh the presale and try again.');
+        }
+      }
       const capacity = await pool.query(
         `
           SELECT
@@ -100,6 +111,14 @@ async function reserveQuote(quote, maxStageTokenMicros) {
 
   return withFileLock(async () => {
     const state = await readFileState();
+    if (replaceQuoteId) {
+      const replaceIndex = state.quotes.findIndex((item) => item.quoteId === replaceQuoteId
+        && item.walletAddress === quote.walletAddress && !item.consumedSignature);
+      if (replaceIndex === -1) {
+        throw new Error('The previous quote cannot be replaced. Refresh the presale and try again.');
+      }
+      state.quotes.splice(replaceIndex, 1);
+    }
     const sold = state.records
       .filter((item) => item.stageId === quote.stageId)
       .reduce((sum, item) => sum + BigInt(item.tokenMicros), 0n);
