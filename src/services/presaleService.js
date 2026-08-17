@@ -182,6 +182,9 @@ async function getState() {
   const raisedMicros = Array.from(totals.values()).reduce((sum, total) => sum + total.raisedMicros, 0n);
   const raisedLamports = Array.from(totals.values()).reduce((sum, total) => sum + total.raisedLamports, 0n);
   const soldMicros = Array.from(totals.values()).reduce((sum, total) => sum + total.soldMicros, 0n);
+  const currentStageRemainingLamports = stage
+    ? ((stage.allocationMicros - totals.get(stage.id).soldMicros) * stage.priceLamports) / TOKEN_SCALE
+    : 0n;
   const targetLamports = STAGES.reduce(
     (sum, item) => sum + (item.priceLamports * item.allocationMicros) / TOKEN_SCALE,
     0n,
@@ -208,6 +211,7 @@ async function getState() {
     participants: new Set(records.map((record) => record.walletAddress)).size,
     currentStageId: stage?.id || null,
     currentPriceSol: stage ? decimalString(stage.priceLamports, 9) : null,
+    maxPaySol: decimalString(currentStageRemainingLamports, 9),
     paymentMethods: { SOL: true, USDC: false },
     stages: STAGES.map((item) => {
       const total = totals.get(item.id);
