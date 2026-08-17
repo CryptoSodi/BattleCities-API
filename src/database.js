@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '017_presale_allocations';
+const REQUIRED_MIGRATION = '018_presale_token_delivery';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

@@ -111,6 +111,33 @@ test('local presale store reserves stage capacity and consumes each quote once',
     assert.equal(first.inserted, true);
     const retry = await presaleStore.consumeQuoteAndRecordAllocation(allocation, '100');
     assert.equal(retry.inserted, false);
+
+    const prepared = await presaleStore.prepareDelivery('signature-one', {
+      signature: 'delivery-one',
+      rawTransaction: 'signed-transaction',
+      blockhash: 'blockhash-one',
+      lastValidBlockHeight: 123,
+    });
+    assert.equal(prepared.deliveryStatus, 'sending');
+    assert.equal(prepared.deliveryAttempts, 1);
+    const duplicatePrepare = await presaleStore.prepareDelivery('signature-one', {
+      signature: 'delivery-two',
+      rawTransaction: 'another-transaction',
+      blockhash: 'blockhash-two',
+      lastValidBlockHeight: 456,
+    });
+    assert.equal(duplicatePrepare.deliveryTransactionSignature, 'delivery-one');
+    assert.equal(duplicatePrepare.deliveryAttempts, 1);
+    const delivered = await presaleStore.markDeliveryDelivered('signature-one', 'delivery-one');
+    assert.equal(delivered.deliveryStatus, 'delivered');
+    const afterDeliveryRetry = await presaleStore.prepareDelivery('signature-one', {
+      signature: 'delivery-three',
+      rawTransaction: 'third-transaction',
+      blockhash: 'blockhash-three',
+      lastValidBlockHeight: 789,
+    });
+    assert.equal(afterDeliveryRetry.deliveryTransactionSignature, 'delivery-one');
+    assert.equal(afterDeliveryRetry.deliveryAttempts, 1);
     await assert.rejects(
       presaleStore.consumeQuoteAndRecordAllocation(
         { ...allocation, signature: 'signature-two' },

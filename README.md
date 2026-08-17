@@ -232,7 +232,7 @@ npm --prefix api-server run db:migrate
 
 The presale frontend reads the live state from `GET /api/presale/state` and
 creates and verifies SOL devnet purchases through `POST /api/presale/quote`
-and `POST /api/presale/verify`. Apply migration `017_presale_allocations.sql`
+and `POST /api/presale/verify`. Apply migrations through `018_presale_token_delivery.sql`
 before enabling these routes, then set the following values in the native API
 environment:
 
@@ -243,15 +243,20 @@ BATTLECITY_PRESALE_TOKEN_MINT=feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh
 BATTLECITY_PRESALE_SOLANA_RPC_URL=https://api.devnet.solana.com
 BATTLECITY_PRESALE_END_AT=2026-09-13T00:00:00.000Z
 BATTLECITY_PRESALE_QUOTE_SECRET=<32 random bytes encoded as hex; server only>
+BATTLECITY_PRESALE_DISTRIBUTION_ADDRESS=9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo
+BATTLECITY_PRESALE_DISTRIBUTION_KEYPAIR_PATH=/etc/battlecities/secrets/batc-distribution.json
 ```
 
 Only SOL devnet payments are enabled. BATC stage prices are fixed in SOL, so
 quotes do not depend on an external market-price feed. A verified allocation is recorded by
 transaction signature and one-time quote ID, so submitting the same confirmed
 transaction remains idempotent while a quote cannot allocate BATC twice. Quote
-reservations are included in atomic stage-cap checks. The API records the BATC
-allocation only; it never signs or transfers BATC and requires no mint-authority
-or treasury private key.
+reservations are included in atomic stage-cap checks. After payment verification,
+the API creates the buyer's Token-2022 associated account when needed and transfers
+the exact BATC allocation from the distribution wallet. The signed delivery is
+stored before broadcast, and retries reuse the stored transaction until it expires,
+preventing duplicate delivery. Keep the distribution keypair outside the repository
+with mode `600`; the API never needs the treasury or mint-authority private key.
 
 Local storage mode writes archive metadata and JSONL frame batches under
 `server-data/match-archives`. Override that path with

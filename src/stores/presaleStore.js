@@ -6,6 +6,13 @@ const storageConfig = require('../config/storageConfig');
 const TABLE_NAME = 'battlecity_presale_allocations';
 const QUOTES_TABLE_NAME = 'battlecity_presale_quotes';
 const PRESALE_LOCK_ID = 424242017;
+const ALLOCATION_COLUMNS = `
+  signature, quote_id, wallet_address, payment_method,
+  payment_atomic, usd_micros, token_micros, stage_id, confirmed_at,
+  delivery_status, delivery_transaction_signature, delivery_attempts,
+  delivery_failure_reason, delivery_started_at, delivery_confirmed_at,
+  delivery_raw_transaction, delivery_blockhash, delivery_last_valid_block_height
+`;
 let fileOperation = Promise.resolve();
 
 function getDataFile() {
@@ -24,9 +31,7 @@ async function listAllocations() {
     await database.assertMigrationsApplied();
     const result = await database.getPool().query(
       `
-        SELECT signature, quote_id, wallet_address, payment_method,
-               payment_atomic, usd_micros, token_micros, stage_id,
-               confirmed_at
+        SELECT ${ALLOCATION_COLUMNS}
         FROM ${TABLE_NAME}
         ORDER BY confirmed_at ASC, signature ASC
       `,
@@ -48,9 +53,7 @@ async function findBySignature(signature) {
     await database.assertMigrationsApplied();
     const result = await database.getPool().query(
       `
-        SELECT signature, quote_id, wallet_address, payment_method,
-               payment_atomic, usd_micros, token_micros, stage_id,
-               confirmed_at
+        SELECT ${ALLOCATION_COLUMNS}
         FROM ${TABLE_NAME}
         WHERE signature = $1
       `,
@@ -122,8 +125,7 @@ async function consumeQuoteAndRecordAllocation(record, maxStageTokenMicros) {
       const pool = database.getPool();
       await pool.query('SELECT pg_advisory_xact_lock($1)', [PRESALE_LOCK_ID]);
       const existingResult = await pool.query(
-        `SELECT signature, quote_id, wallet_address, payment_method, payment_atomic,
-                usd_micros, token_micros, stage_id, confirmed_at
+        `SELECT ${ALLOCATION_COLUMNS}
          FROM ${TABLE_NAME} WHERE signature = $1`,
         [record.signature],
       );
@@ -154,8 +156,7 @@ async function consumeQuoteAndRecordAllocation(record, maxStageTokenMicros) {
             (signature, quote_id, wallet_address, payment_method, payment_atomic,
              usd_micros, token_micros, stage_id, confirmed_at)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          RETURNING signature, quote_id, wallet_address, payment_method,
-                    payment_atomic, usd_micros, token_micros, stage_id, confirmed_at
+          RETURNING ${ALLOCATION_COLUMNS}
         `,
         [record.signature, record.quoteId, record.walletAddress, record.paymentMethod,
           record.paymentAtomic, record.usdMicros, record.tokenMicros, record.stageId,
@@ -187,6 +188,140 @@ async function consumeQuoteAndRecordAllocation(record, maxStageTokenMicros) {
     quote.consumedSignature = record.signature;
     await writeFileState(state);
     return { inserted: true, record: normalized };
+  });
+}
+
+async function prepareDelivery(paymentSignature, delivery) {
+  if (hasPersistentStore()) {
+    await database.assertMigrationsApplied();
+    return database.withTransaction(async () => {
+      const pool = database.getPool();
+      const currentResult = await pool.query(
+        `SELECT ${ALLOCATION_COLUMNS} FROM ${TABLE_NAME} WHERE signature = $1 FOR UPDATE`,
+        [paymentSignature],
+      );
+      if (currentResult.rowCount !== 1) throw new Error('Verified purchase was not found.');
+      const current = normalizeRecord(currentResult.rows[0]);
+      if (current.deliveryStatus === 'delivered'
+        || (current.deliveryStatus === 'sending' && current.deliveryRawTransaction)) {
+        return current;
+      }
+      const updated = await pool.query(
+        `UPDATE ${TABLE_NAME}
+         SET delivery_status = 'sending',
+             delivery_transaction_signature = $2,
+             delivery_attempts = delivery_attempts + 1,
+             delivery_failure_reason = NULL,
+             delivery_started_at = NOW(),
+             delivery_raw_transaction = $3,
+             delivery_blockhash = $4,
+             delivery_last_valid_block_height = $5
+         WHERE signature = $1
+         RETURNING ${ALLOCATION_COLUMNS}`,
+        [paymentSignature, delivery.signature, delivery.rawTransaction,
+          delivery.blockhash, delivery.lastValidBlockHeight],
+      );
+      return normalizeRecord(updated.rows[0]);
+    });
+  }
+
+  return withFileLock(async () => {
+    const state = await readFileState();
+    const index = state.records.findIndex((item) => item.signature === paymentSignature);
+    if (index === -1) throw new Error('Verified purchase was not found.');
+    const current = normalizeRecord(state.records[index]);
+    if (current.deliveryStatus === 'delivered'
+      || (current.deliveryStatus === 'sending' && current.deliveryRawTransaction)) {
+      return current;
+    }
+    state.records[index] = normalizeRecord({
+      ...current,
+      deliveryStatus: 'sending',
+      deliveryTransactionSignature: delivery.signature,
+      deliveryAttempts: current.deliveryAttempts + 1,
+      deliveryFailureReason: null,
+      deliveryStartedAt: new Date().toISOString(),
+      deliveryRawTransaction: delivery.rawTransaction,
+      deliveryBlockhash: delivery.blockhash,
+      deliveryLastValidBlockHeight: String(delivery.lastValidBlockHeight),
+    });
+    await writeFileState(state);
+    return state.records[index];
+  });
+}
+
+async function markDeliveryDelivered(paymentSignature, deliverySignature) {
+  return updateDeliveryResult(paymentSignature, deliverySignature, 'delivered', null);
+}
+
+async function markDeliveryFailed(paymentSignature, deliverySignature, reason) {
+  return updateDeliveryResult(paymentSignature, deliverySignature, 'failed', String(reason || 'Delivery failed.').slice(0, 1000));
+}
+
+async function markDeliveryPreparationFailed(paymentSignature, reason) {
+  const failure = String(reason || 'Delivery preparation failed.').slice(0, 1000);
+  if (hasPersistentStore()) {
+    await database.assertMigrationsApplied();
+    const result = await database.getPool().query(
+      `UPDATE ${TABLE_NAME}
+       SET delivery_status = 'failed',
+           delivery_attempts = delivery_attempts + 1,
+           delivery_failure_reason = $2
+       WHERE signature = $1 AND delivery_status <> 'delivered'
+       RETURNING ${ALLOCATION_COLUMNS}`,
+      [paymentSignature, failure],
+    );
+    if (result.rowCount !== 1) return findBySignature(paymentSignature);
+    return normalizeRecord(result.rows[0]);
+  }
+  return withFileLock(async () => {
+    const state = await readFileState();
+    const index = state.records.findIndex((item) => item.signature === paymentSignature);
+    if (index === -1) throw new Error('Verified purchase was not found.');
+    const current = normalizeRecord(state.records[index]);
+    if (current.deliveryStatus !== 'delivered') {
+      state.records[index] = normalizeRecord({
+        ...current,
+        deliveryStatus: 'failed',
+        deliveryAttempts: current.deliveryAttempts + 1,
+        deliveryFailureReason: failure,
+      });
+      await writeFileState(state);
+    }
+    return state.records[index];
+  });
+}
+
+async function updateDeliveryResult(paymentSignature, deliverySignature, status, reason) {
+  if (hasPersistentStore()) {
+    await database.assertMigrationsApplied();
+    const result = await database.getPool().query(
+      `UPDATE ${TABLE_NAME}
+       SET delivery_status = $3,
+           delivery_failure_reason = $4,
+           delivery_confirmed_at = CASE WHEN $3 = 'delivered' THEN NOW() ELSE delivery_confirmed_at END
+       WHERE signature = $1 AND delivery_transaction_signature = $2
+       RETURNING ${ALLOCATION_COLUMNS}`,
+      [paymentSignature, deliverySignature, status, reason],
+    );
+    if (result.rowCount !== 1) return findBySignature(paymentSignature);
+    return normalizeRecord(result.rows[0]);
+  }
+
+  return withFileLock(async () => {
+    const state = await readFileState();
+    const index = state.records.findIndex((item) => item.signature === paymentSignature);
+    if (index === -1) throw new Error('Verified purchase was not found.');
+    const current = normalizeRecord(state.records[index]);
+    if (current.deliveryTransactionSignature !== deliverySignature) return current;
+    state.records[index] = normalizeRecord({
+      ...current,
+      deliveryStatus: status,
+      deliveryFailureReason: reason,
+      deliveryConfirmedAt: status === 'delivered' ? new Date().toISOString() : current.deliveryConfirmedAt,
+    });
+    await writeFileState(state);
+    return state.records[index];
   });
 }
 
@@ -234,6 +369,7 @@ function assertQuoteMatchesRecord(quote, record) {
 }
 
 function normalizeRecord(record) {
+  const nullableDate = (value) => value ? new Date(value).toISOString() : null;
   return {
     signature: String(record.signature),
     quoteId: String(record.quoteId ?? record.quote_id),
@@ -244,6 +380,17 @@ function normalizeRecord(record) {
     tokenMicros: String(record.tokenMicros ?? record.token_micros),
     stageId: Number(record.stageId ?? record.stage_id),
     confirmedAt: new Date(record.confirmedAt ?? record.confirmed_at).toISOString(),
+    deliveryStatus: String(record.deliveryStatus ?? record.delivery_status ?? 'pending'),
+    deliveryTransactionSignature: record.deliveryTransactionSignature
+      ?? record.delivery_transaction_signature ?? null,
+    deliveryAttempts: Number(record.deliveryAttempts ?? record.delivery_attempts ?? 0),
+    deliveryFailureReason: record.deliveryFailureReason ?? record.delivery_failure_reason ?? null,
+    deliveryStartedAt: nullableDate(record.deliveryStartedAt ?? record.delivery_started_at),
+    deliveryConfirmedAt: nullableDate(record.deliveryConfirmedAt ?? record.delivery_confirmed_at),
+    deliveryRawTransaction: record.deliveryRawTransaction ?? record.delivery_raw_transaction ?? null,
+    deliveryBlockhash: record.deliveryBlockhash ?? record.delivery_blockhash ?? null,
+    deliveryLastValidBlockHeight: record.deliveryLastValidBlockHeight
+      ?? record.delivery_last_valid_block_height ?? null,
   };
 }
 
@@ -251,5 +398,9 @@ module.exports = {
   consumeQuoteAndRecordAllocation,
   findBySignature,
   listAllocations,
+  markDeliveryDelivered,
+  markDeliveryFailed,
+  markDeliveryPreparationFailed,
+  prepareDelivery,
   reserveQuote,
 };

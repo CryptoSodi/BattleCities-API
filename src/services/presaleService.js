@@ -8,6 +8,7 @@ const {
   TransactionInstruction,
 } = require('@solana/web3.js');
 const presaleStore = require('../stores/presaleStore');
+const presaleDelivery = require('./presaleDelivery');
 const solanaRpc = require('./solanaRpc');
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
@@ -32,7 +33,9 @@ function getConfig() {
   const treasuryAddress = String(process.env.BATTLECITY_PRESALE_TREASURY_ADDRESS || '').trim();
   let treasury = null;
   const tokenMintAddress = String(process.env.BATTLECITY_PRESALE_TOKEN_MINT || '').trim();
+  const distributionAddressValue = String(process.env.BATTLECITY_PRESALE_DISTRIBUTION_ADDRESS || '').trim();
   let tokenMint = null;
+  let distributionAddress = null;
   try {
     treasury = treasuryAddress ? new PublicKey(treasuryAddress) : null;
   } catch {
@@ -42,6 +45,11 @@ function getConfig() {
     tokenMint = tokenMintAddress ? new PublicKey(tokenMintAddress) : null;
   } catch {
     tokenMint = null;
+  }
+  try {
+    distributionAddress = distributionAddressValue ? new PublicKey(distributionAddressValue) : null;
+  } catch {
+    distributionAddress = null;
   }
   return {
     endAt,
@@ -55,6 +63,9 @@ function getConfig() {
     maxOracleConfidenceBps: Number(process.env.BATTLECITY_PRESALE_MAX_ORACLE_CONFIDENCE_BPS || 100),
     treasury,
     tokenMint,
+    tokenDecimals: TOKEN_DECIMALS,
+    distributionAddress,
+    distributionKeypairPath: String(process.env.BATTLECITY_PRESALE_DISTRIBUTION_KEYPAIR_PATH || '').trim(),
   };
 }
 
@@ -62,6 +73,8 @@ function isConfigured(config = getConfig()) {
   return config.network === 'devnet'
     && config.treasury !== null
     && config.tokenMint?.toBase58() === TOKEN_MINT
+    && config.distributionAddress !== null
+    && config.distributionKeypairPath.length > 0
     && config.quoteSecret.length >= 32
     && Number.isFinite(config.endAt.getTime());
 }
@@ -312,7 +325,10 @@ async function verifyPurchase(input) {
   if (!/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(signature)) throw new Error('Invalid transaction signature.');
 
   const existing = await presaleStore.findBySignature(signature);
-  if (existing !== null) return { purchase: existing, state: await getState() };
+  if (existing !== null) {
+    const delivered = await presaleDelivery.deliverPurchase(existing, config);
+    return { purchase: publicPurchase(delivered), state: await getState() };
+  }
 
   const quote = verifyQuoteToken(input?.quoteToken, config.quoteSecret);
   validateQuote(quote, config);
@@ -332,7 +348,28 @@ async function verifyPurchase(input) {
     stageId: quote.stageId,
     confirmedAt: tx.blockTime ? new Date(tx.blockTime * 1000).toISOString() : new Date().toISOString(),
   }, stage.allocationMicros.toString());
-  return { purchase: result.record, state: await getState() };
+  const delivered = await presaleDelivery.deliverPurchase(result.record, config);
+  return { purchase: publicPurchase(delivered), state: await getState() };
+}
+
+function publicPurchase(record) {
+  return {
+    signature: record.signature,
+    quoteId: record.quoteId,
+    walletAddress: record.walletAddress,
+    paymentMethod: record.paymentMethod,
+    paymentAtomic: record.paymentAtomic,
+    tokenMicros: record.tokenMicros,
+    stageId: record.stageId,
+    confirmedAt: record.confirmedAt,
+    deliveryStatus: record.deliveryStatus,
+    deliveryTransactionSignature: record.deliveryTransactionSignature,
+    deliveryAttempts: record.deliveryAttempts,
+    deliveryConfirmedAt: record.deliveryConfirmedAt,
+    deliveryFailureReason: record.deliveryStatus === 'failed'
+      ? 'BATC delivery is pending a safe retry.'
+      : null,
+  };
 }
 
 function validateQuote(quote, config) {

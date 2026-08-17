@@ -163,6 +163,20 @@ test('presale migration records verified allocations idempotently', async () => 
   assert.match(sql, /CREATE INDEX IF NOT EXISTS battlecity_presale_allocations_stage_id_idx/);
 });
 
+test('presale delivery migration makes Token-2022 delivery traceable and retryable', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/018_presale_token_delivery.sql'),
+    'utf8',
+  );
+  assert.match(sql, /delivery_status TEXT NOT NULL DEFAULT 'pending'/);
+  assert.match(sql, /delivery_transaction_signature TEXT/);
+  assert.match(sql, /delivery_attempts INTEGER NOT NULL DEFAULT 0/);
+  assert.match(sql, /delivery_failure_reason TEXT/);
+  assert.match(sql, /delivery_raw_transaction TEXT/);
+  assert.match(sql, /delivery_status IN \('pending', 'sending', 'delivered', 'failed'\)/);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS battlecity_presale_allocations_delivery_signature_idx/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {
