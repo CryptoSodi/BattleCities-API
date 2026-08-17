@@ -32,6 +32,9 @@ import * as multiplayerMatches from '../routes/multiplayer/matches';
 import * as phases from '../routes/phases';
 import * as player from '../routes/player';
 import * as presence from '../routes/presence';
+import * as presaleQuote from '../routes/presale/quote';
+import * as presaleState from '../routes/presale/state';
+import * as presaleVerify from '../routes/presale/verify';
 import * as playerProfile from '../routes/players/profile';
 import * as quests from '../routes/quests';
 import * as questClaim from '../routes/quests/claim';
@@ -89,6 +92,9 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   phases,
   player,
   presence,
+  'presale/quote': presaleQuote,
+  'presale/state': presaleState,
+  'presale/verify': presaleVerify,
   quests,
   'quests/claim': questClaim,
   rankings,

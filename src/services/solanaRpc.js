@@ -15,12 +15,12 @@ function getRpcUrl() {
 
 // Fetches a confirmed transaction (jsonParsed). Returns null when the
 // signature is unknown/not yet confirmed; throws on transport errors.
-async function getTransaction(signature) {
+async function getTransaction(signature, rpcUrl = getRpcUrl()) {
   if (typeof fetch !== 'function') {
     throw new Error('global fetch is not available in this runtime');
   }
 
-  const response = await fetch(getRpcUrl(), {
+  const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

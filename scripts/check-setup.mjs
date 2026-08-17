@@ -7,6 +7,7 @@ loadLocalEnv();
 
 const googleAuth = require('../src/services/googleAuth');
 const storageConfig = require('../src/config/storageConfig');
+const presaleService = require('../src/services/presaleService');
 
 const databaseUrl = storageConfig.getDatabaseUrl();
 const database = describeDatabase(databaseUrl);
@@ -41,6 +42,14 @@ const status = {
       ? 'configured'
       : 'missing',
   },
+  presale: {
+    configured: presaleService.isConfigured(),
+    network: process.env.BATTLECITY_PRESALE_NETWORK || null,
+    treasury: isConfigured('BATTLECITY_PRESALE_TREASURY_ADDRESS'),
+    tokenMint: isConfigured('BATTLECITY_PRESALE_TOKEN_MINT'),
+    pythApiKey: isConfigured('BATTLECITY_PRESALE_PYTH_API_KEY'),
+    quoteSecret: isConfigured('BATTLECITY_PRESALE_QUOTE_SECRET'),
+  },
 };
 
 console.log(JSON.stringify(status, null, 2));
@@ -49,7 +58,8 @@ if (
   !status.postgres.configured ||
   !status.google.configured ||
   !status.cherry.configured ||
-  !status.broadcaster.configured
+  !status.broadcaster.configured ||
+  !status.presale.configured
 ) {
   process.exitCode = 1;
 }

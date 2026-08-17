@@ -148,6 +148,21 @@ test('site presence migration supports anonymous visitors and multiple tabs', as
   assert.match(sql, /DROP TABLE battlecity_player_presence/);
 });
 
+test('presale migration records verified allocations idempotently', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/017_presale_allocations.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_presale_allocations\b/);
+  assert.match(sql, /signature TEXT PRIMARY KEY/);
+  assert.match(sql, /quote_id TEXT NOT NULL UNIQUE/);
+  assert.match(sql, /payment_method IN \('SOL'\)/);
+  assert.match(sql, /stage_id BETWEEN 1 AND 3/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_presale_quotes\b/);
+  assert.match(sql, /consumed_signature TEXT UNIQUE/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS battlecity_presale_allocations_stage_id_idx/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {
