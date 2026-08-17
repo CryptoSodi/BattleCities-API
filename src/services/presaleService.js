@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const {
+  ComputeBudgetProgram,
   Connection,
   LAMPORTS_PER_SOL,
   PublicKey,
@@ -299,6 +300,7 @@ async function createQuote(input) {
   const connection = new Connection(config.rpcUrl, 'confirmed');
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({ feePayer: wallet, recentBlockhash: blockhash });
+  transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
   transaction.add(SystemProgram.transfer({ fromPubkey: wallet, toPubkey: config.treasury, lamports: Number(paymentAtomic) }));
   transaction.add(new TransactionInstruction({ programId: MEMO_PROGRAM_ID, keys: [], data: Buffer.from(`${MEMO_PREFIX}${quoteToken}`, 'utf8') }));
   await presaleStore.reserveQuote({
