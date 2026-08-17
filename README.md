@@ -241,18 +241,12 @@ BATTLECITY_PRESALE_NETWORK=devnet
 BATTLECITY_PRESALE_TREASURY_ADDRESS=6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F
 BATTLECITY_PRESALE_TOKEN_MINT=feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh
 BATTLECITY_PRESALE_SOLANA_RPC_URL=https://api.devnet.solana.com
-BATTLECITY_PRESALE_PYTH_SOL_USD_FEED_ID=ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d
-BATTLECITY_PRESALE_PYTH_HERMES_URL=https://pyth.dourolabs.app/hermes
-BATTLECITY_PRESALE_PYTH_API_KEY=<server-only Pyth API key>
-BATTLECITY_PRESALE_MAX_ORACLE_AGE_SECONDS=90
-BATTLECITY_PRESALE_MAX_ORACLE_CONFIDENCE_BPS=100
 BATTLECITY_PRESALE_END_AT=2026-09-13T00:00:00.000Z
 BATTLECITY_PRESALE_QUOTE_SECRET=<32 random bytes encoded as hex; server only>
 ```
 
-Only SOL devnet payments are enabled. The server retrieves a live SOL/USD
-price from Pyth for each short-lived quote, while retaining the paid SOL and
-the USD value captured in that quote. A verified allocation is recorded by
+Only SOL devnet payments are enabled. BATC stage prices are fixed in SOL, so
+quotes do not depend on an external market-price feed. A verified allocation is recorded by
 transaction signature and one-time quote ID, so submitting the same confirmed
 transaction remains idempotent while a quote cannot allocate BATC twice. Quote
 reservations are included in atomic stage-cap checks. The API records the BATC

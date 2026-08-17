@@ -17,15 +17,14 @@ const TOKEN_STANDARD = 'Token-2022';
 const TOKEN_DECIMALS = 6;
 const TOKEN_TOTAL_SUPPLY_MICROS = 50_000_000_000_000n;
 const TOKEN_SCALE = 1_000_000n;
-const USD_SCALE = 1_000_000n;
 const QUOTE_TTL_MS = 2 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
 const PYTH_SOL_USD_FEED_ID = 'ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d';
 const DEFAULT_PYTH_HERMES_URL = 'https://pyth.dourolabs.app/hermes';
 const STAGES = Object.freeze([
-  { id: 1, label: 'Stage 1', priceMicros: 5_000n, allocationMicros: 200_000_000_000n },
-  { id: 2, label: 'Stage 2', priceMicros: 6_000n, allocationMicros: 150_000_000_000n },
-  { id: 3, label: 'Stage 3', priceMicros: 7_500n, allocationMicros: 150_000_000_000n },
+  { id: 1, label: 'Stage 1', priceLamports: 40_000n, allocationMicros: 200_000_000_000n },
+  { id: 2, label: 'Stage 2', priceLamports: 66_667n, allocationMicros: 150_000_000_000n },
+  { id: 3, label: 'Stage 3', priceLamports: 80_000n, allocationMicros: 150_000_000_000n },
 ]);
 
 function getConfig() {
@@ -64,14 +63,7 @@ function isConfigured(config = getConfig()) {
     && config.treasury !== null
     && config.tokenMint?.toBase58() === TOKEN_MINT
     && config.quoteSecret.length >= 32
-    && config.pythApiKey.length > 0
-    && /^[a-f0-9]{64}$/i.test(config.pythFeedId)
-    && /^https:\/\//.test(config.pythHermesUrl)
-    && Number.isFinite(config.endAt.getTime())
-    && Number.isInteger(config.maxOracleAgeSeconds)
-    && config.maxOracleAgeSeconds > 0
-    && Number.isInteger(config.maxOracleConfidenceBps)
-    && config.maxOracleConfidenceBps > 0;
+    && Number.isFinite(config.endAt.getTime());
 }
 
 function parseDecimalToAtomic(value, decimals) {
@@ -190,17 +182,11 @@ async function getState() {
   const raisedMicros = Array.from(totals.values()).reduce((sum, total) => sum + total.raisedMicros, 0n);
   const raisedLamports = Array.from(totals.values()).reduce((sum, total) => sum + total.raisedLamports, 0n);
   const soldMicros = Array.from(totals.values()).reduce((sum, total) => sum + total.soldMicros, 0n);
-  const targetMicros = STAGES.reduce(
-    (sum, item) => sum + (item.priceMicros * item.allocationMicros) / TOKEN_SCALE,
+  const targetLamports = STAGES.reduce(
+    (sum, item) => sum + (item.priceLamports * item.allocationMicros) / TOKEN_SCALE,
     0n,
   );
 
-  let livePrice = null;
-  try {
-    livePrice = await getLiveSolUsdPrice(config);
-  } catch {
-    // State remains available while quote creation fails closed if the oracle is unavailable.
-  }
   return {
     configured: isConfigured(config),
     network: config.network,
@@ -216,16 +202,12 @@ async function getState() {
     },
     endAt: config.endAt.toISOString(),
     ended: Date.now() >= config.endAt.getTime() || stage === null,
-    raisedUsd: decimalString(raisedMicros, 6),
     raisedSol: decimalString(raisedLamports, 9),
-    targetUsd: decimalString(targetMicros, 6),
+    targetSol: decimalString(targetLamports, 9),
     soldBatc: decimalString(soldMicros, 6),
     participants: new Set(records.map((record) => record.walletAddress)).size,
     currentStageId: stage?.id || null,
-    currentPriceUsd: stage ? decimalString(stage.priceMicros, 6) : null,
-    solUsdPrice: livePrice ? decimalString(livePrice.usdMicrosPerSol, 6) : null,
-    priceSource: livePrice?.source || 'Live price unavailable',
-    pricePublishedAt: livePrice?.publishedAt || null,
+    currentPriceSol: stage ? decimalString(stage.priceLamports, 9) : null,
     paymentMethods: { SOL: true, USDC: false },
     stages: STAGES.map((item) => {
       const total = totals.get(item.id);
@@ -233,10 +215,9 @@ async function getState() {
       return {
         id: item.id,
         label: item.label,
-        priceUsd: decimalString(item.priceMicros, 6),
+        priceSol: decimalString(item.priceLamports, 9),
         allocationBatc: decimalString(item.allocationMicros, 6),
         soldBatc: decimalString(sold, 6),
-        raisedUsd: decimalString(total.raisedMicros, 6),
         raisedSol: decimalString(total.raisedLamports, 9),
         status: sold >= item.allocationMicros ? 'sold-out' : item.id === stage?.id ? 'active' : 'upcoming',
       };
@@ -265,9 +246,8 @@ async function createQuote(input) {
 
   const paymentAtomic = parseDecimalToAtomic(input?.payAmount, 9);
   if (paymentAtomic > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Payment amount is too large.');
-  const livePrice = await getLiveSolUsdPrice(config);
-  const usdMicros = paymentAtomic * livePrice.usdMicrosPerSol / BigInt(LAMPORTS_PER_SOL);
-  const tokenMicros = usdMicros * TOKEN_SCALE / stage.priceMicros;
+  const usdMicros = 0n;
+  const tokenMicros = paymentAtomic * TOKEN_SCALE / stage.priceLamports;
   if (tokenMicros <= 0n) throw new Error('Payment is too small for the current stage.');
 
   const remaining = stage.allocationMicros - totals.get(stage.id).soldMicros;
@@ -285,8 +265,6 @@ async function createQuote(input) {
     treasury: config.treasury.toBase58(),
     network: config.network,
     tokenMint: config.tokenMint.toBase58(),
-    solUsdMicros: livePrice.usdMicrosPerSol.toString(),
-    pricePublishedAt: livePrice.publishedAt,
     issuedAt,
     expiresAt: issuedAt + QUOTE_TTL_MS,
   };
@@ -316,14 +294,10 @@ async function createQuote(input) {
     stageLabel: stage.label,
     method: 'SOL',
     payAmount: decimalString(paymentAtomic, 9),
-    usdAmount: decimalString(usdMicros, 6),
     batcAmount: decimalString(tokenMicros, 6),
-    tokenPriceUsd: decimalString(stage.priceMicros, 6),
+    tokenPriceSol: decimalString(stage.priceLamports, 9),
     treasury: config.treasury.toBase58(),
     network: config.network,
-    solUsdPrice: decimalString(livePrice.usdMicrosPerSol, 6),
-    priceSource: livePrice.source,
-    pricePublishedAt: livePrice.publishedAt,
   };
 }
 
