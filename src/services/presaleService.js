@@ -8,13 +8,22 @@ const {
   Transaction,
   TransactionInstruction,
 } = require('@solana/web3.js');
+const {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+} = require('@solana/spl-token');
 const presaleStore = require('../stores/presaleStore');
 const presaleDelivery = require('./presaleDelivery');
 const solanaRpc = require('./solanaRpc');
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 const MEMO_PREFIX = 'BATC-PRESALE-V1:';
-const TOKEN_MINT = 'feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh';
+const TOKEN_MINTS = Object.freeze({
+  devnet: 'feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh',
+  'mainnet-beta': 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz',
+});
 const TOKEN_STANDARD = 'Token-2022';
 const TOKEN_DECIMALS = 6;
 const TOKEN_TOTAL_SUPPLY_MICROS = 50_000_000_000_000n;
@@ -71,9 +80,9 @@ function getConfig() {
 }
 
 function isConfigured(config = getConfig()) {
-  return config.network === 'devnet'
+  return Object.hasOwn(TOKEN_MINTS, config.network)
     && config.treasury !== null
-    && config.tokenMint?.toBase58() === TOKEN_MINT
+    && config.tokenMint?.toBase58() === TOKEN_MINTS[config.network]
     && config.distributionAddress !== null
     && config.distributionKeypairPath.length > 0
     && config.quoteSecret.length >= 32
@@ -300,7 +309,22 @@ async function createQuote(input) {
   const connection = new Connection(config.rpcUrl, 'confirmed');
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({ feePayer: wallet, recentBlockhash: blockhash });
+  const buyerTokenAccount = getAssociatedTokenAddressSync(
+    config.tokenMint,
+    wallet,
+    false,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  );
   transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }));
+  transaction.add(createAssociatedTokenAccountIdempotentInstruction(
+    wallet,
+    buyerTokenAccount,
+    wallet,
+    config.tokenMint,
+    TOKEN_2022_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  ));
   transaction.add(SystemProgram.transfer({ fromPubkey: wallet, toPubkey: config.treasury, lamports: Number(paymentAtomic) }));
   transaction.add(new TransactionInstruction({ programId: MEMO_PROGRAM_ID, keys: [], data: Buffer.from(`${MEMO_PREFIX}${quoteToken}`, 'utf8') }));
   await presaleStore.reserveQuote({

@@ -10,7 +10,6 @@ const {
 const {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_2022_PROGRAM_ID,
-  createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
   getAccount,
   getAssociatedTokenAddressSync,
@@ -107,20 +106,21 @@ async function createPreparedDelivery(connection, purchase, config) {
     throw new Error('Distribution token account does not match the configured wallet and mint.');
   }
   if (sourceAccount.amount < amount) throw new Error('Distribution wallet has insufficient BATC.');
+  let destinationAccount;
+  try {
+    destinationAccount = await getAccount(connection, destination, 'confirmed', TOKEN_2022_PROGRAM_ID);
+  } catch {
+    throw new Error('Buyer BATC token account is missing. Request a new quote and approve the account-creation fee in Phantom.');
+  }
+  if (!destinationAccount.owner.equals(buyer) || !destinationAccount.mint.equals(mint)) {
+    throw new Error('Buyer BATC token account does not match the configured wallet and mint.');
+  }
 
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({
     feePayer: distributor.publicKey,
     recentBlockhash: blockhash,
   });
-  transaction.add(createAssociatedTokenAccountIdempotentInstruction(
-    distributor.publicKey,
-    destination,
-    buyer,
-    mint,
-    TOKEN_2022_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
-  ));
   transaction.add(createTransferCheckedInstruction(
     source,
     mint,

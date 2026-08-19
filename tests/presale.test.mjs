@@ -31,6 +31,24 @@ test('presale quote signatures are tamper evident', () => {
   assert.throws(() => presale.verifyQuoteToken(`${token}x`, secret));
 });
 
+test('presale accepts the configured BATC mint on mainnet only', () => {
+  const baseConfig = {
+    network: 'mainnet-beta',
+    treasury: { toBase58: () => '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F' },
+    tokenMint: { toBase58: () => 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz' },
+    distributionAddress: { toBase58: () => '9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo' },
+    distributionKeypairPath: '/secure/distribution.json',
+    quoteSecret: crypto.randomBytes(32).toString('hex'),
+    endAt: new Date('2026-09-13T00:00:00.000Z'),
+  };
+
+  assert.equal(presale.isConfigured(baseConfig), true);
+  assert.equal(presale.isConfigured({
+    ...baseConfig,
+    tokenMint: { toBase58: () => 'feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh' },
+  }), false);
+});
+
 test('Pyth SOL/USD values convert exactly to USD micros', () => {
   assert.equal(presale.pythPriceToUsdMicros('15012345678', -8), 150123456n);
   assert.equal(presale.pythPriceToUsdMicros('150', 0), 150000000n);
