@@ -6,7 +6,9 @@ const {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionMessage,
   TransactionInstruction,
+  VersionedTransaction,
 } = require('@solana/web3.js');
 const {
   ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -345,7 +347,12 @@ async function createQuote(input) {
   ));
   transaction.add(SystemProgram.transfer({ fromPubkey: wallet, toPubkey: config.treasury, lamports: Number(paymentAtomic) }));
   transaction.add(new TransactionInstruction({ programId: MEMO_PROGRAM_ID, keys: [], data: Buffer.from(`${MEMO_PREFIX}${quoteToken}`, 'utf8') }));
-  const simulation = await connection.simulateTransaction(transaction, {
+  const simulationTransaction = new VersionedTransaction(new TransactionMessage({
+    payerKey: wallet,
+    recentBlockhash: blockhash,
+    instructions: transaction.instructions,
+  }).compileToV0Message());
+  const simulation = await connection.simulateTransaction(simulationTransaction, {
     commitment: 'confirmed',
     sigVerify: false,
   });
