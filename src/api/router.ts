@@ -33,6 +33,7 @@ import * as phases from '../routes/phases';
 import * as player from '../routes/player';
 import * as presence from '../routes/presence';
 import * as presaleQuote from '../routes/presale/quote';
+import * as presaleBalance from '../routes/presale/balance';
 import * as presaleState from '../routes/presale/state';
 import * as presaleVerify from '../routes/presale/verify';
 import * as playerProfile from '../routes/players/profile';
@@ -93,6 +94,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   player,
   presence,
   'presale/quote': presaleQuote,
+  'presale/balance': presaleBalance,
   'presale/state': presaleState,
   'presale/verify': presaleVerify,
   quests,

@@ -253,6 +253,25 @@ async function getState() {
   };
 }
 
+async function getWalletBalance(walletAddress) {
+  const config = getConfig();
+  if (!isConfigured(config)) throw new Error('Presale backend is not configured yet.');
+
+  let wallet;
+  try {
+    wallet = new PublicKey(String(walletAddress || '').trim());
+  } catch {
+    throw new Error('Invalid wallet address.');
+  }
+
+  const connection = new Connection(config.rpcUrl, 'confirmed');
+  const lamports = await connection.getBalance(wallet, 'confirmed');
+  return {
+    lamports: String(lamports),
+    sol: decimalString(BigInt(lamports), 9),
+  };
+}
+
 async function createQuote(input) {
   const config = getConfig();
   if (!isConfigured(config)) throw new Error('Presale backend is not configured yet.');
@@ -469,6 +488,7 @@ module.exports = {
   decimalString,
   getState,
   getLiveSolUsdPrice,
+  getWalletBalance,
   isConfigured,
   parseDecimalToAtomic,
   pythPriceToUsdMicros,
