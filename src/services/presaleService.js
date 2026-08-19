@@ -219,7 +219,7 @@ async function getState() {
     rpcUrl: config.rpcUrl,
     treasury: config.treasury?.toBase58() || null,
     token: {
-      name: 'BattleCity',
+      name: 'Battle Cities',
       symbol: 'BATC',
       mint: config.tokenMint?.toBase58() || null,
       standard: TOKEN_STANDARD,
