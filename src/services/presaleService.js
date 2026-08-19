@@ -216,7 +216,6 @@ async function getState() {
   return {
     configured: isConfigured(config),
     network: config.network,
-    rpcUrl: config.rpcUrl,
     treasury: config.treasury?.toBase58() || null,
     token: {
       name: 'Battle Cities',
@@ -346,6 +345,13 @@ async function createQuote(input) {
   ));
   transaction.add(SystemProgram.transfer({ fromPubkey: wallet, toPubkey: config.treasury, lamports: Number(paymentAtomic) }));
   transaction.add(new TransactionInstruction({ programId: MEMO_PROGRAM_ID, keys: [], data: Buffer.from(`${MEMO_PREFIX}${quoteToken}`, 'utf8') }));
+  const simulation = await connection.simulateTransaction(transaction, {
+    commitment: 'confirmed',
+    sigVerify: false,
+  });
+  if (simulation.value.err) {
+    throw new Error('The transaction did not pass simulation. Check your SOL balance and try a lower amount.');
+  }
   await presaleStore.reserveQuote({
     quoteId: payload.id,
     walletAddress: payload.walletAddress,
