@@ -106,25 +106,27 @@ test('X OAuth returns to the public site without changing game OAuth redirects',
   }
 });
 
-test('X follow checks use Battle Cities’ stable X user ID by default', async () => {
+test('X follow verification reads only the Battle Cities user resource with user context', async () => {
   await withTestEnv(async () => {
     const requests = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (url, options = {}) => {
       requests.push({ url: String(url), options });
-      return Response.json({ data: [{ id: '2070252693130731520' }] });
+      return Response.json({ data: { connection_status: ['following'] } });
     };
     try {
-      assert.equal(await xOAuth.checkFollowsBattleCities('123456789'), true);
+      assert.equal(await xOAuth.verifyFollowWithUserToken('user-access-token'), true);
     } finally {
       globalThis.fetch = originalFetch;
     }
-    assert.match(requests[0].url, /\/2\/users\/123456789\/following/);
+    assert.match(requests[0].url, /\/2\/users\/2070252693130731520/);
+    assert.match(requests[0].url, /user.fields=connection_status/);
+    assert.equal(requests[0].options.headers.authorization, 'Bearer user-access-token');
     assert.equal(requests.length, 1);
   });
 });
 
-test('X follow checks expose a safe upstream failure diagnostic', async () => {
+test('X follow verification exposes a safe upstream failure diagnostic', async () => {
   await withTestEnv(async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => Response.json(
@@ -133,8 +135,8 @@ test('X follow checks expose a safe upstream failure diagnostic', async () => {
     );
     try {
       await assert.rejects(
-        xOAuth.checkFollowsBattleCities('123456789'),
-        /X follow verification failed \(401: Unauthorized\)/,
+        xOAuth.verifyFollowWithUserToken('user-access-token'),
+        /X relationship verification failed \(401: Unauthorized\)/,
       );
     } finally {
       globalThis.fetch = originalFetch;

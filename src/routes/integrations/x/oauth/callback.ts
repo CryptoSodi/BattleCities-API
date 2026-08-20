@@ -18,6 +18,20 @@ export async function GET(request: Request): Promise<Response> {
     if (!session?.playerId) return redirectError('login');
     const completed = await xOAuth.completeConnection({ code, state, sessionId });
     if (completed.playerId !== session.playerId) return redirectError('state');
+    if (completed.purpose === xOAuth.FOLLOW_VERIFICATION_PURPOSE) {
+      if (!rateLimiter.allow('x-follow-check', completed.playerId)) return redirectError('rate');
+      const linkedAccount = await xConnectionStore.readLinkedAccount(completed.playerId);
+      if (linkedAccount === null || String(linkedAccount.x_user_id || linkedAccount.xUserId) !== completed.profile.id) {
+        return redirectError('account');
+      }
+      const follows = await xOAuth.verifyFollowWithUserToken(completed.accessToken);
+      await xConnectionStore.recordFollowCheckAndGrantReward(
+        { id: completed.playerId },
+        completed.profile.id,
+        follows,
+      );
+      return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xFollowVerified=1'));
+    }
     const result = await xConnectionStore.linkAccount(
       completed.playerId,
       completed.profile.id,
@@ -26,7 +40,9 @@ export async function GET(request: Request): Promise<Response> {
     return result.ok
       ? xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xConnected=1'))
       : redirectError('linked');
-  } catch {
+  } catch (error) {
+    // The service deliberately sanitizes X errors and never includes tokens.
+    console.warn('[battlecities-api] X OAuth callback failed', error);
     return redirectError('failed');
   }
 }

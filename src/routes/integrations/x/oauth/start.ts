@@ -16,8 +16,9 @@ export async function GET(request: Request): Promise<Response> {
     return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xError=rate'));
   }
   try {
+    const purpose = new URL(request.url).searchParams.get('purpose') || xOAuth.CONNECTION_PURPOSE;
     return xOAuth.redirectResponse(
-      xOAuth.createAuthorizationUrl(new URL(request.url).origin, player.id, sessionId),
+      xOAuth.createAuthorizationUrl(new URL(request.url).origin, player.id, sessionId, purpose),
     );
   } catch {
     return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xError=config'));

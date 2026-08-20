@@ -12,20 +12,18 @@ const STATE_VERSION = 1;
 const MAX_STATE_LENGTH = 500;
 const MAX_CODE_LENGTH = 2048;
 const BATTLECITIES_X_USER_ID = '2070252693130731520';
+const CONNECTION_PURPOSE = 'connect';
+const FOLLOW_VERIFICATION_PURPOSE = 'verify-follow';
 
 function getConfig() {
   return {
     clientId: String(process.env.X_CLIENT_ID || '').trim(),
     clientSecret: String(process.env.X_CLIENT_SECRET || '').trim(),
-    bearerToken: String(process.env.X_BEARER_TOKEN || '').trim(),
     redirectUri: String(process.env.X_OAUTH_REDIRECT_URI || '').trim(),
     stateSecret: String(process.env.X_OAUTH_STATE_SECRET || '').trim(),
     targetUserId: String(
       process.env.X_BATTLECITIES_USER_ID || BATTLECITIES_X_USER_ID,
     ).trim(),
-    targetUsername: String(
-      process.env.X_BATTLECITIES_USERNAME || 'BattleCitiesHQ',
-    ).trim().replace(/^@/, ''),
   };
 }
 
@@ -34,17 +32,15 @@ function isConfigured() {
   return (
     config.clientId !== '' &&
     config.clientSecret !== '' &&
-    config.bearerToken !== '' &&
     Buffer.byteLength(config.stateSecret, 'utf8') >= 32 &&
     isValidRedirectUri(config.redirectUri) &&
-    (config.targetUserId !== ''
-      ? /^\d{1,20}$/.test(config.targetUserId)
-      : /^[A-Za-z0-9_]{1,15}$/.test(config.targetUsername))
+    /^\d{1,20}$/.test(config.targetUserId)
   );
 }
 
-function createAuthorizationUrl(origin, playerId, sessionId) {
+function createAuthorizationUrl(origin, playerId, sessionId, purpose = CONNECTION_PURPOSE) {
   const config = requireConfig();
+  if (!isSupportedPurpose(purpose)) throw new Error('Invalid X OAuth purpose');
   const redirectUri = getRedirectUri(origin);
   const codeVerifier = crypto.randomBytes(32).toString('base64url');
   const params = new URLSearchParams({
@@ -57,6 +53,7 @@ function createAuthorizationUrl(origin, playerId, sessionId) {
       sessionBinding: createSessionBinding(sessionId),
       redirectUri,
       codeVerifier,
+      purpose,
     }),
     code_challenge: crypto
       .createHash('sha256')
@@ -83,25 +80,33 @@ async function completeConnection({ code, state, sessionId }) {
     statePayload.redirectUri,
     statePayload.codeVerifier,
   );
-  return { playerId: statePayload.playerId, profile: await fetchCurrentUser(accessToken) };
+  return {
+    playerId: statePayload.playerId,
+    purpose: statePayload.purpose || CONNECTION_PURPOSE,
+    profile: await fetchCurrentUser(accessToken),
+    // This is intentionally returned only to the OAuth callback. It is never
+    // persisted, sent to the browser, or logged.
+    accessToken,
+  };
 }
 
-async function checkFollowsBattleCities(xUserId) {
-  if (!/^\d{1,20}$/.test(String(xUserId || ''))) {
-    throw new Error('Invalid X account');
+async function verifyFollowWithUserToken(accessToken) {
+  if (typeof accessToken !== 'string' || accessToken === '') {
+    throw new Error('Invalid X user access token');
   }
-  const targetUserId = await getTargetUserId();
-  let paginationToken = null;
-  for (let page = 0; page < 20; page += 1) {
-    const url = new URL(`https://api.x.com/2/users/${encodeURIComponent(xUserId)}/following`);
-    url.searchParams.set('max_results', '1000');
-    if (paginationToken !== null) url.searchParams.set('pagination_token', paginationToken);
-    const response = await xApi(url);
-    if ((response.data || []).some(user => user.id === targetUserId)) return true;
-    paginationToken = response.meta?.next_token || null;
-    if (paginationToken === null) return false;
-  }
-  throw new Error('X follow verification reached its safe page limit');
+  const { targetUserId } = requireConfig();
+  // One user resource, with the authenticated user's relationship to it. Do
+  // not use paginated followers/following lists: X bills those per returned
+  // account and they are unsuitable for a reward verification flow.
+  const url = new URL(`https://api.x.com/2/users/${encodeURIComponent(targetUserId)}`);
+  url.searchParams.set('user.fields', 'connection_status');
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw await createXApiError(response, 'X relationship verification failed');
+  const body = await response.json();
+  return Array.isArray(body?.data?.connection_status)
+    && body.data.connection_status.includes('following');
 }
 
 async function exchangeCode(code, redirectUri, codeVerifier) {
@@ -143,34 +148,14 @@ async function fetchCurrentUser(accessToken) {
   return profile;
 }
 
-async function getTargetUserId() {
-  const config = requireConfig();
-  if (config.targetUserId !== '') return config.targetUserId;
-  const result = await xApi(
-    `https://api.x.com/2/users/by/username/${encodeURIComponent(config.targetUsername)}`,
-  );
-  if (!/^\d{1,20}$/.test(String(result.data?.id || ''))) {
-    throw new Error('BattleCities X account lookup failed');
-  }
-  return result.data.id;
-}
-
-async function xApi(url) {
-  const response = await fetch(url, {
-    headers: { authorization: `Bearer ${requireConfig().bearerToken}` },
-  });
-  if (!response.ok) {
-    // X can return useful error titles such as "Unauthorized" or
-    // "Usage cap exceeded". Keep that diagnostic, but never log its body,
-    // request URL, or authorization header because those could contain
-    // sensitive account information.
-    const body = await response.json().catch(() => null);
-    const title = typeof body?.title === 'string'
-      ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
-      : 'request failed';
-    throw new Error(`X follow verification failed (${response.status}: ${title})`);
-  }
-  return response.json();
+async function createXApiError(response, prefix) {
+  // Preserve only a short, sanitized upstream status for operations. Never
+  // emit the body, URL, or authorization header.
+  const body = await response.json().catch(() => null);
+  const title = typeof body?.title === 'string'
+    ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
+    : 'request failed';
+  return new Error(`${prefix} (${response.status}: ${title})`);
 }
 
 function createState(payload) {
@@ -219,6 +204,7 @@ function verifyState(state) {
       typeof body.sessionBinding !== 'string' ||
       typeof body.redirectUri !== 'string' ||
       typeof body.codeVerifier !== 'string' ||
+      (body.purpose !== undefined && !isSupportedPurpose(body.purpose)) ||
       typeof body.issuedAt !== 'number' ||
       body.issuedAt > Date.now() ||
       Date.now() - body.issuedAt > STATE_TTL_MS
@@ -250,6 +236,12 @@ function createFrontendRedirect(pathname) {
     process.env.BATTLECITY_X_WEB_BASE_URL || process.env.BATTLECITY_WEB_BASE_URL || '',
   ).trim();
   return baseUrl === '' ? pathname : new URL(pathname, `${baseUrl.replace(/\/+$/, '')}/`).toString();
+}
+
+function isSupportedPurpose(value) {
+  // Keep the OAuth state purpose explicit so future one-resource campaign
+  // checks (post/reply verification) cannot accidentally enter this flow.
+  return value === CONNECTION_PURPOSE || value === FOLLOW_VERIFICATION_PURPOSE;
 }
 
 function redirectResponse(location) {
@@ -298,10 +290,12 @@ function base64UrlDecode(value) {
 
 module.exports = {
   CALLBACK_PATH,
-  checkFollowsBattleCities,
+  CONNECTION_PURPOSE,
   completeConnection,
   createAuthorizationUrl,
   createFrontendRedirect,
+  FOLLOW_VERIFICATION_PURPOSE,
   isConfigured,
   redirectResponse,
+  verifyFollowWithUserToken,
 };
