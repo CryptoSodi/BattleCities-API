@@ -6,6 +6,8 @@ import * as googleAuthStart from '../routes/auth/google/start';
 import * as adminMatches from '../routes/admin/matches';
 import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
+import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
+import * as adminLiveUsers from '../routes/admin/liveUsers';
 import * as adminReplays from '../routes/admin/replays';
 import * as adminSession from '../routes/admin/session';
 import * as adminTournaments from '../routes/admin/tournaments';
@@ -63,6 +65,7 @@ type RouteHandler = (request: Request) => Response | Promise<Response>;
 
 const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
+  'admin/site-settings/live-users': adminLiveUsers,
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
   'admin/replays': adminReplays,
@@ -129,6 +132,7 @@ const multiplayerEventRoutePattern = /^events\/([^/]+)\/(enter|start|leaderboard
 const playerProfileRoutePattern = /^players\/([^/]+)\/profile(?:\/matches\/([^/]+)\/replay)?$/;
 const discordVerifiedUserRoutePattern = /^integrations\/discord\/verified-users\/([^/]+)$/;
 const adminTournamentRoutePattern = /^admin\/tournaments\/([^/]+)(?:\/(leaderboard|prizes\/distribute))?$/;
+const adminPlayerXConnectionRoutePattern = /^admin\/players\/(ply-[a-z0-9-]+)\/x-connection$/i;
 
 function resolveRoute(request: Request): string {
   const url = new URL(request.url);
@@ -143,6 +147,18 @@ function resolveRoute(request: Request): string {
 
 async function dispatch(request: Request): Promise<Response> {
   const route = resolveRoute(request);
+  const adminPlayerXConnectionMatch = route.match(adminPlayerXConnectionRoutePattern);
+  if (adminPlayerXConnectionMatch !== null) {
+    const [, playerId] = adminPlayerXConnectionMatch;
+    const method = request.method.toUpperCase();
+    if (method === 'DELETE') {
+      return adminPlayerXConnection.DELETE(request, playerId);
+    }
+    if (method === 'OPTIONS') {
+      return adminPlayerXConnection.OPTIONS(request);
+    }
+    return methodNotAllowed('DELETE, OPTIONS');
+  }
   const adminTournamentMatch = route.match(adminTournamentRoutePattern);
   if (adminTournamentMatch !== null) {
     const [, tournamentId, action = null] = adminTournamentMatch;

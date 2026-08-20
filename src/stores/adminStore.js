@@ -244,6 +244,8 @@ async function listPlayers(options = {}) {
         COALESCE(e.token_balance, 0) AS token_balance,
         COALESCE(e.sol_balance, 0) AS sol_balance,
         COALESCE(e.fuel_balance, 0) AS fuel_balance,
+        x.x_username AS x_username,
+        x.follows_battlecities AS x_follows_battlecities,
         COUNT(DISTINCT mp.match_id)::INTEGER AS matches_played,
         COUNT(DISTINCT mp.match_id) FILTER (WHERE mm.status = 'completed')::INTEGER
           AS matches_completed,
@@ -251,6 +253,7 @@ async function listPlayers(options = {}) {
         COUNT(*) OVER()::INTEGER AS total_count
       FROM battlecity_players p
       LEFT JOIN battlecity_economy_accounts e ON e.player_id = p.id
+      LEFT JOIN battlecity_x_connections x ON x.player_id = p.id
       LEFT JOIN battlecity_multiplayer_participants mp ON mp.player_id = p.id
       LEFT JOIN battlecity_multiplayer_matches mm ON mm.id = mp.match_id
       LEFT JOIN battlecity_multiplayer_scores ms
@@ -260,7 +263,7 @@ async function listPlayers(options = {}) {
         OR p.id ILIKE $1)
         AND ($4::DATE IS NULL OR p.last_seen_at >= $4::DATE)
         AND ($5::DATE IS NULL OR p.last_seen_at < ($5::DATE + INTERVAL '1 day'))
-      GROUP BY p.id, e.player_id
+      GROUP BY p.id, e.player_id, x.x_username, x.follows_battlecities
       ORDER BY p.last_seen_at DESC
       LIMIT $2 OFFSET $3
     `,
@@ -319,6 +322,8 @@ function fromPlayerRow(row) {
     tokenBalance: Number(row.token_balance),
     solBalance: Number(row.sol_balance),
     fuelBalance: Number(row.fuel_balance),
+    xUsername: row.x_username || null,
+    xFollowsBattleCities: Boolean(row.x_follows_battlecities),
     matchesPlayed: Number(row.matches_played),
     matchesCompleted: Number(row.matches_completed),
     bestMultiplayerScore: Number(row.best_multiplayer_score),

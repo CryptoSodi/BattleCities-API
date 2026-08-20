@@ -9,6 +9,7 @@ import {
 const presenceStore = require('../stores/presenceStore');
 const presenceIdentity = require('../services/presenceIdentity');
 const rateLimiter = require('../services/rateLimiter');
+const siteSettingsStore = require('../stores/siteSettingsStore');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -17,6 +18,7 @@ export function OPTIONS(request: Request): Response {
 export async function GET(request: Request): Promise<Response> {
   const response = createJsonResponse(request, {
     ...(await presenceStore.getCounts()),
+    liveUsersEnabled: await siteSettingsStore.getLiveUsersEnabled(),
     updatedAt: new Date().toISOString(),
   });
   response.headers.set('cache-control', 'no-store');
@@ -52,7 +54,11 @@ export async function POST(request: Request): Promise<Response> {
   });
   return createJsonResponse(
     request,
-    { ok: true, ...(await presenceStore.getCounts()) },
+    {
+      ok: true,
+      ...(await presenceStore.getCounts()),
+      liveUsersEnabled: await siteSettingsStore.getLiveUsersEnabled(),
+    },
     200,
     existingVisitorId === null
       ? presenceIdentity.createPresenceCookie(

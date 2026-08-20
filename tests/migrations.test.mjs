@@ -189,6 +189,26 @@ test('X connection migration enforces one validated account per player', async (
   assert.match(sql, /follows_battlecities BOOLEAN NOT NULL DEFAULT FALSE/);
 });
 
+test('X follow reward migration makes the five Fuel grant idempotent per player', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/020_x_follow_rewards.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_x_follow_rewards\b/);
+  assert.match(sql, /player_id TEXT PRIMARY KEY REFERENCES battlecity_players\(id\) ON DELETE CASCADE/);
+  assert.match(sql, /fuel_amount INTEGER NOT NULL CHECK \(fuel_amount = 5\)/);
+});
+
+test('live users setting migration defaults the public counter to disabled', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/021_live_users_setting.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_site_settings\b/);
+  assert.match(sql, /CHECK \(setting_key = 'live_users_enabled'\)/);
+  assert.match(sql, /VALUES \('live_users_enabled', FALSE\)/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

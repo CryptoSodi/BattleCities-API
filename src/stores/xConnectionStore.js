@@ -1,8 +1,11 @@
 const database = require('../database');
 const storageConfig = require('../config/storageConfig');
+const economyStore = require('./economyStore');
 
 const localByPlayerId = new Map();
 const localPlayerIdByXUserId = new Map();
+const localFollowRewardsByPlayerId = new Set();
+const X_FOLLOW_FUEL_REWARD = 5;
 
 function hasPersistentConfig() {
   return storageConfig.hasDatabaseConfig();
@@ -77,6 +80,68 @@ async function recordFollowCheck(playerId, follows) {
   );
 }
 
+async function unlinkAccount(playerId) {
+  if (!hasPersistentConfig()) {
+    const entry = localByPlayerId.get(playerId) || null;
+    if (entry?.xUserId) localPlayerIdByXUserId.delete(entry.xUserId);
+    localByPlayerId.delete(playerId);
+    return { disconnected: entry !== null };
+  }
+
+  await database.assertMigrationsApplied();
+  const result = await database.getPool().query(
+    'DELETE FROM battlecity_x_connections WHERE player_id = $1 RETURNING player_id',
+    [playerId],
+  );
+  return { disconnected: result.rowCount !== 0 };
+}
+
+async function recordFollowCheckAndGrantReward(player, xUserId, follows) {
+  if (!follows) {
+    await recordFollowCheck(player.id, false);
+    return { granted: false };
+  }
+
+  if (!hasPersistentConfig()) {
+    await recordFollowCheck(player.id, true);
+    if (localFollowRewardsByPlayerId.has(player.id)) return { granted: false };
+    await creditFirstFollowFuel(player);
+    localFollowRewardsByPlayerId.add(player.id);
+    return { granted: true };
+  }
+
+  await database.assertMigrationsApplied();
+  return database.withTransaction(async () => {
+    const pool = database.getPool();
+    const updated = await pool.query(
+      `UPDATE battlecity_x_connections
+       SET follows_battlecities = TRUE, followed_checked_at = NOW(), updated_at = NOW()
+       WHERE player_id = $1
+       RETURNING player_id`,
+      [player.id],
+    );
+    if (updated.rowCount === 0) return { granted: false };
+    const receipt = await pool.query(
+      `INSERT INTO battlecity_x_follow_rewards (player_id, x_user_id, fuel_amount)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (player_id) DO NOTHING
+       RETURNING player_id`,
+      [player.id, xUserId, X_FOLLOW_FUEL_REWARD],
+    );
+    if (receipt.rowCount === 0) return { granted: false };
+    await creditFirstFollowFuel(player);
+    return { granted: true };
+  });
+}
+
+function creditFirstFollowFuel(player) {
+  return economyStore.creditFuel(player, X_FOLLOW_FUEL_REWARD, {
+    reason: 'x-follow-reward',
+    sourceType: 'x-follow-reward',
+    sourceId: 'first-follow',
+  });
+}
+
 function linkLocalAccount(playerId, xUserId, xUsername) {
   const linkedPlayerId = localPlayerIdByXUserId.get(xUserId);
   if (linkedPlayerId && linkedPlayerId !== playerId) return { ok: false, error: 'This X account is already linked to another player' };
@@ -111,4 +176,12 @@ function toIso(value) {
   return value instanceof Date ? value.toISOString() : value || null;
 }
 
-module.exports = { linkAccount, readConnection, readLinkedAccount, recordFollowCheck };
+module.exports = {
+  X_FOLLOW_FUEL_REWARD,
+  linkAccount,
+  unlinkAccount,
+  readConnection,
+  readLinkedAccount,
+  recordFollowCheck,
+  recordFollowCheckAndGrantReward,
+};

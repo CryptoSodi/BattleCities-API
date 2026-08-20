@@ -21,7 +21,17 @@ export async function GET(request: Request): Promise<Response> {
   }
   try {
     const follows = await xOAuth.checkFollowsBattleCities(account.x_user_id || account.xUserId);
-    await xConnectionStore.recordFollowCheck(player.id, follows);
+    const reward = await xConnectionStore.recordFollowCheckAndGrantReward(
+      player,
+      account.x_user_id || account.xUserId,
+      follows,
+    );
+    const connection = await xConnectionStore.readConnection(player.id);
+    return createJsonResponse(request, {
+      authenticated: true,
+      ...connection,
+      followRewardGranted: reward.granted,
+    });
   } catch (error) {
     console.warn('[battlecities-api] X follow check failed', error);
   }
