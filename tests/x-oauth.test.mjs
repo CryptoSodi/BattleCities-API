@@ -30,6 +30,16 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
     assert.ok(state.length <= 500);
     assert.equal(state.includes(sessionId), false);
     assert.equal(state.split('.').length, 3);
+    const followVerificationState = new URL(
+      xOAuth.createAuthorizationUrl(
+        'https://api.battlecities.com',
+        playerId,
+        sessionId,
+        xOAuth.FOLLOW_VERIFICATION_PURPOSE,
+      ),
+    ).searchParams.get('state');
+    assert.ok(followVerificationState);
+    assert.ok(followVerificationState.length <= 500);
     assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(
       authorizationUrl.searchParams.get('scope'),

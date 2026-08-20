@@ -53,7 +53,9 @@ function createAuthorizationUrl(origin, playerId, sessionId, purpose = CONNECTIO
       sessionBinding: createSessionBinding(sessionId),
       redirectUri,
       codeVerifier,
-      purpose,
+      // X allows state values no longer than 500 characters. Omit the default
+      // entirely and use a one-character marker for the only alternate flow.
+      purpose: purpose === FOLLOW_VERIFICATION_PURPOSE ? 'f' : undefined,
     }),
     code_challenge: crypto
       .createHash('sha256')
@@ -82,7 +84,9 @@ async function completeConnection({ code, state, sessionId }) {
   );
   return {
     playerId: statePayload.playerId,
-    purpose: statePayload.purpose || CONNECTION_PURPOSE,
+    purpose: statePayload.purpose === 'f'
+      ? FOLLOW_VERIFICATION_PURPOSE
+      : CONNECTION_PURPOSE,
     profile: await fetchCurrentUser(accessToken),
     // This is intentionally returned only to the OAuth callback. It is never
     // persisted, sent to the browser, or logged.
@@ -204,7 +208,9 @@ function verifyState(state) {
       typeof body.sessionBinding !== 'string' ||
       typeof body.redirectUri !== 'string' ||
       typeof body.codeVerifier !== 'string' ||
-      (body.purpose !== undefined && !isSupportedPurpose(body.purpose)) ||
+      // Accept the full legacy value briefly for in-flight states created by
+      // the previous deployment; new states use a compact marker.
+      (body.purpose !== undefined && body.purpose !== 'f' && !isSupportedPurpose(body.purpose)) ||
       typeof body.issuedAt !== 'number' ||
       body.issuedAt > Date.now() ||
       Date.now() - body.issuedAt > STATE_TTL_MS
