@@ -18,7 +18,10 @@ const LIMITS = {
   'cherry-embed-token': { max: 20, windowMs: 60 * 1000 },
   'x-oauth-start': { max: 10, windowMs: 60 * 1000 },
   'x-oauth-callback': { max: 10, windowMs: 60 * 1000 },
-  'x-follow-check': { max: 2, windowMs: 15 * 60 * 1000 },
+  // A newly connected player often follows in a separate X tab. Allow a few
+  // short rechecks so their page can update promptly while remaining far
+  // below X's application-level follow lookup limit.
+  'x-follow-check': { max: 6, windowMs: 15 * 60 * 1000 },
 };
 
 // Returns true when the call is allowed; false when the caller should get 429.
