@@ -159,7 +159,17 @@ async function xApi(url) {
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${requireConfig().bearerToken}` },
   });
-  if (!response.ok) throw new Error('X follow verification failed');
+  if (!response.ok) {
+    // X can return useful error titles such as "Unauthorized" or
+    // "Usage cap exceeded". Keep that diagnostic, but never log its body,
+    // request URL, or authorization header because those could contain
+    // sensitive account information.
+    const body = await response.json().catch(() => null);
+    const title = typeof body?.title === 'string'
+      ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
+      : 'request failed';
+    throw new Error(`X follow verification failed (${response.status}: ${title})`);
+  }
   return response.json();
 }
 

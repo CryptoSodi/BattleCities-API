@@ -124,6 +124,24 @@ test('X follow checks use Battle Cities’ stable X user ID by default', async (
   });
 });
 
+test('X follow checks expose a safe upstream failure diagnostic', async () => {
+  await withTestEnv(async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json(
+      { title: 'Unauthorized', detail: 'Sensitive content must never be surfaced.' },
+      { status: 401 },
+    );
+    try {
+      await assert.rejects(
+        xOAuth.checkFollowsBattleCities('123456789'),
+        /X follow verification failed \(401: Unauthorized\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 async function withTestEnv(operation) {
   const original = new Map();
   for (const [key, value] of Object.entries(TEST_ENV)) {
