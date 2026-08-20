@@ -3,6 +3,7 @@ declare const require: any;
 import { createJsonResponse, createOptionsResponse, resolveSessionPlayer } from '../../_helpers';
 
 const xConnectionStore = require('../../../stores/xConnectionStore');
+const repostTasks = require('../../../stores/xRepostTaskStore');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -14,5 +15,10 @@ export async function GET(request: Request): Promise<Response> {
   const account = await xConnectionStore.readLinkedAccount(player.id);
   if (account === null) return createJsonResponse(request, { authenticated: true, connected: false, follows: false });
 
-  return createJsonResponse(request, { authenticated: true, ...(await xConnectionStore.readConnection(player.id)) });
+  const state = await xConnectionStore.readConnection(player.id);
+  return createJsonResponse(request, {
+    authenticated: true,
+    ...state,
+    repostTask: state.follows ? await repostTasks.activeForPlayer(player.id) : null,
+  });
 }

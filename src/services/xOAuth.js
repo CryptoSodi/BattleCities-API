@@ -47,15 +47,15 @@ function createAuthorizationUrl(origin, playerId, sessionId, purpose = CONNECTIO
     response_type: 'code',
     client_id: config.clientId,
     redirect_uri: redirectUri,
-    scope: 'tweet.read users.read follows.read',
+    scope: 'tweet.read tweet.write users.read follows.read',
     state: createState({
       playerId,
       sessionBinding: createSessionBinding(sessionId),
       redirectUri,
       codeVerifier,
-      // X allows state values no longer than 500 characters. Omit the default
-      // entirely and use a one-character marker for the only alternate flow.
-      purpose: purpose === FOLLOW_VERIFICATION_PURPOSE ? 'f' : undefined,
+      // X limits state values to 500 characters; compact purpose markers keep
+      // the encrypted, session-bound state within that limit.
+      purpose: purpose === 'repost' ? 'r' : purpose === FOLLOW_VERIFICATION_PURPOSE ? 'f' : undefined,
     }),
     code_challenge: crypto
       .createHash('sha256')
@@ -84,14 +84,40 @@ async function completeConnection({ code, state, sessionId }) {
   );
   return {
     playerId: statePayload.playerId,
-    purpose: statePayload.purpose === 'f'
-      ? FOLLOW_VERIFICATION_PURPOSE
-      : CONNECTION_PURPOSE,
+    purpose: statePayload.purpose === 'r'
+      ? 'repost'
+      : statePayload.purpose === 'f'
+        ? FOLLOW_VERIFICATION_PURPOSE
+        : CONNECTION_PURPOSE,
     profile: await fetchCurrentUser(accessToken),
     // This is intentionally returned only to the OAuth callback. It is never
     // persisted, sent to the browser, or logged.
     accessToken,
   };
+}
+
+async function repostWithUserToken(accessToken, userId, postId) {
+  if (typeof accessToken !== 'string' || accessToken === '') {
+    throw new Error('Invalid X user access token');
+  }
+  if (!/^\d{1,20}$/.test(String(userId)) || !/^\d{1,20}$/.test(String(postId))) {
+    throw new Error('Invalid X repost target');
+  }
+  const response = await fetch(
+    `https://api.x.com/2/users/${encodeURIComponent(userId)}/retweets`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tweet_id: postId }),
+    },
+  );
+  const body = await response.json().catch(() => null);
+  if (!response.ok || body?.data?.retweeted !== true) {
+    throw new Error('X repost was not confirmed');
+  }
 }
 
 async function verifyFollowWithUserToken(accessToken) {
@@ -210,7 +236,7 @@ function verifyState(state) {
       typeof body.codeVerifier !== 'string' ||
       // Accept the full legacy value briefly for in-flight states created by
       // the previous deployment; new states use a compact marker.
-      (body.purpose !== undefined && body.purpose !== 'f' && !isSupportedPurpose(body.purpose)) ||
+      (body.purpose !== undefined && body.purpose !== 'r' && body.purpose !== 'f' && !isSupportedPurpose(body.purpose)) ||
       typeof body.issuedAt !== 'number' ||
       body.issuedAt > Date.now() ||
       Date.now() - body.issuedAt > STATE_TTL_MS
@@ -247,7 +273,9 @@ function createFrontendRedirect(pathname) {
 function isSupportedPurpose(value) {
   // Keep the OAuth state purpose explicit so future one-resource campaign
   // checks (post/reply verification) cannot accidentally enter this flow.
-  return value === CONNECTION_PURPOSE || value === FOLLOW_VERIFICATION_PURPOSE;
+  return value === CONNECTION_PURPOSE
+    || value === FOLLOW_VERIFICATION_PURPOSE
+    || value === 'repost';
 }
 
 function redirectResponse(location) {
@@ -304,4 +332,5 @@ module.exports = {
   isConfigured,
   redirectResponse,
   verifyFollowWithUserToken,
+  repostWithUserToken,
 };

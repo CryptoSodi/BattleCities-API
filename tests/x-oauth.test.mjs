@@ -40,10 +40,20 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
     ).searchParams.get('state');
     assert.ok(followVerificationState);
     assert.ok(followVerificationState.length <= 500);
+    const repostState = new URL(
+      xOAuth.createAuthorizationUrl(
+        'https://api.battlecities.com',
+        playerId,
+        sessionId,
+        'repost',
+      ),
+    ).searchParams.get('state');
+    assert.ok(repostState);
+    assert.ok(repostState.length <= 500);
     assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(
       authorizationUrl.searchParams.get('scope'),
-      'tweet.read users.read follows.read',
+      'tweet.read tweet.write users.read follows.read',
     );
 
     const requests = [];
@@ -63,6 +73,12 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
       });
       assert.equal(completed.playerId, playerId);
       assert.equal(completed.profile.id, '123456789');
+      const repostCompleted = await xOAuth.completeConnection({
+        code: 'authorization-code',
+        state: repostState,
+        sessionId,
+      });
+      assert.equal(repostCompleted.purpose, 'repost');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -151,6 +167,27 @@ test('X follow verification exposes a safe upstream failure diagnostic', async (
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+test('X repost uses the current user token and only rewards a confirmed repost', async () => {
+  await withTestEnv(async () => {
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), options });
+      return Response.json({ data: { retweeted: true } });
+    };
+    try {
+      await xOAuth.repostWithUserToken('user-access-token', '123456789', '987654321');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /\/2\/users\/123456789\/retweets$/);
+    assert.equal(requests[0].options.method, 'POST');
+    assert.equal(requests[0].options.headers.authorization, 'Bearer user-access-token');
+    assert.equal(requests[0].options.body, JSON.stringify({ tweet_id: '987654321' }));
   });
 });
 

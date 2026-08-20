@@ -8,6 +8,7 @@ import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
 import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
 import * as adminLiveUsers from '../routes/admin/liveUsers';
+import * as adminXRepostTasks from '../routes/admin/xRepostTasks';
 import * as adminReplays from '../routes/admin/replays';
 import * as adminSession from '../routes/admin/session';
 import * as adminTournaments from '../routes/admin/tournaments';
@@ -66,6 +67,7 @@ type RouteHandler = (request: Request) => Response | Promise<Response>;
 const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
   'admin/site-settings/live-users': adminLiveUsers,
+  'admin/x/repost-tasks': adminXRepostTasks,
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
   'admin/replays': adminReplays,

@@ -16,7 +16,12 @@ export async function GET(request: Request): Promise<Response> {
     return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xError=rate'));
   }
   try {
-    const purpose = new URL(request.url).searchParams.get('purpose') || xOAuth.CONNECTION_PURPOSE;
+    const requestedPurpose = new URL(request.url).searchParams.get('purpose');
+    const purpose = requestedPurpose === 'repost'
+      ? 'repost'
+      : requestedPurpose === xOAuth.FOLLOW_VERIFICATION_PURPOSE
+        ? xOAuth.FOLLOW_VERIFICATION_PURPOSE
+        : xOAuth.CONNECTION_PURPOSE;
     return xOAuth.redirectResponse(
       xOAuth.createAuthorizationUrl(new URL(request.url).origin, player.id, sessionId, purpose),
     );

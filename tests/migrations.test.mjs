@@ -209,6 +209,18 @@ test('live users setting migration defaults the public counter to disabled', asy
   assert.match(sql, /VALUES \('live_users_enabled', FALSE\)/);
 });
 
+test('X repost task migration limits rewards to one five Fuel claim per player and task', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/022_x_repost_tasks.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_x_repost_tasks\b/);
+  assert.match(sql, /reward_fuel INTEGER NOT NULL DEFAULT 5 CHECK \(reward_fuel = 5\)/);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS battlecity_x_repost_one_active/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_x_repost_claims\b/);
+  assert.match(sql, /PRIMARY KEY \(task_id, player_id\)/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

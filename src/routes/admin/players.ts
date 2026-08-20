@@ -18,6 +18,7 @@ export async function GET(request: Request): Promise<Response> {
       query: url.searchParams.get('q'),
       lastSeenFrom: url.searchParams.get('lastSeenFrom'),
       lastSeenTo: url.searchParams.get('lastSeenTo'),
+      xConnected: url.searchParams.get('xConnected'),
       limit: url.searchParams.get('limit'),
       offset: url.searchParams.get('offset'),
     });
