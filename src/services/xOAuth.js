@@ -11,6 +11,7 @@ const STATE_VERSION = 1;
 // that limit for real Battle Cities player IDs.
 const MAX_STATE_LENGTH = 500;
 const MAX_CODE_LENGTH = 2048;
+const BATTLECITIES_X_USER_ID = '2070252693130731520';
 
 function getConfig() {
   return {
@@ -19,7 +20,9 @@ function getConfig() {
     bearerToken: String(process.env.X_BEARER_TOKEN || '').trim(),
     redirectUri: String(process.env.X_OAUTH_REDIRECT_URI || '').trim(),
     stateSecret: String(process.env.X_OAUTH_STATE_SECRET || '').trim(),
-    targetUserId: String(process.env.X_BATTLECITIES_USER_ID || '').trim(),
+    targetUserId: String(
+      process.env.X_BATTLECITIES_USER_ID || BATTLECITIES_X_USER_ID,
+    ).trim(),
     targetUsername: String(
       process.env.X_BATTLECITIES_USERNAME || 'BattleCitiesHQ',
     ).trim().replace(/^@/, ''),

@@ -106,6 +106,24 @@ test('X OAuth returns to the public site without changing game OAuth redirects',
   }
 });
 
+test('X follow checks use Battle Cities’ stable X user ID by default', async () => {
+  await withTestEnv(async () => {
+    const requests = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url: String(url), options });
+      return Response.json({ data: [{ id: '2070252693130731520' }] });
+    };
+    try {
+      assert.equal(await xOAuth.checkFollowsBattleCities('123456789'), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    assert.match(requests[0].url, /\/2\/users\/123456789\/following/);
+    assert.equal(requests.length, 1);
+  });
+});
+
 async function withTestEnv(operation) {
   const original = new Map();
   for (const [key, value] of Object.entries(TEST_ENV)) {
