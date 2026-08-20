@@ -17,11 +17,17 @@ const TEST_ENV = {
 test('X OAuth keeps session and PKCE values opaque and uses confidential-client auth', async () => {
   await withTestEnv(async () => {
     const sessionId = 'session-secret-that-must-not-leak';
+    const playerId = 'ply-msalfmd1-f146c7fd0bbe5cbd8410';
     const authorizationUrl = new URL(
-      xOAuth.createAuthorizationUrl('https://api.battlecities.com', 'ply-test', sessionId),
+      xOAuth.createAuthorizationUrl(
+        'https://api.battlecities.com',
+        playerId,
+        sessionId,
+      ),
     );
     const state = authorizationUrl.searchParams.get('state');
     assert.ok(state);
+    assert.ok(state.length <= 500);
     assert.equal(state.includes(sessionId), false);
     assert.equal(state.split('.').length, 3);
     assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
@@ -45,7 +51,7 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
         state,
         sessionId,
       });
-      assert.equal(completed.playerId, 'ply-test');
+      assert.equal(completed.playerId, playerId);
       assert.equal(completed.profile.id, '123456789');
     } finally {
       globalThis.fetch = originalFetch;

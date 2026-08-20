@@ -6,7 +6,10 @@ const CURRENT_USER_URL = 'https://api.x.com/2/users/me?user.fields=username';
 const CALLBACK_PATH = '/api/integrations/x/oauth/callback';
 const STATE_TTL_MS = 10 * 60 * 1000;
 const STATE_VERSION = 1;
-const MAX_STATE_LENGTH = 4096;
+// X accepts OAuth state values up to 500 characters. Keep the verifier at the
+// PKCE minimum (43 base64url characters) so the encrypted state stays below
+// that limit for real Battle Cities player IDs.
+const MAX_STATE_LENGTH = 500;
 const MAX_CODE_LENGTH = 2048;
 
 function getConfig() {
@@ -40,7 +43,7 @@ function isConfigured() {
 function createAuthorizationUrl(origin, playerId, sessionId) {
   const config = requireConfig();
   const redirectUri = getRedirectUri(origin);
-  const codeVerifier = crypto.randomBytes(48).toString('base64url');
+  const codeVerifier = crypto.randomBytes(32).toString('base64url');
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
