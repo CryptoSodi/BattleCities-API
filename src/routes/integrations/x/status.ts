@@ -16,6 +16,17 @@ export async function GET(request: Request): Promise<Response> {
   if (player === null) return createJsonResponse(request, { authenticated: false }, 401);
   const account = await xConnectionStore.readLinkedAccount(player.id);
   if (account === null) return createJsonResponse(request, { authenticated: true, connected: false, follows: false });
+
+  // Reading the connection state must never consume an X API request. A
+  // player explicitly opts into a live check with ?refresh=1 after visiting
+  // the Battle Cities X profile.
+  const refreshRequested = new URL(request.url).searchParams.get('refresh') === '1';
+  if (!refreshRequested) {
+    return createJsonResponse(request, {
+      authenticated: true,
+      ...(await xConnectionStore.readConnection(player.id)),
+    });
+  }
   if (!rateLimiter.allow('x-follow-check', player.id)) {
     return createJsonResponse(request, { authenticated: true, ...(await xConnectionStore.readConnection(player.id)) });
   }
