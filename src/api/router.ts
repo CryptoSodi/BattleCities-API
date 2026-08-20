@@ -24,6 +24,9 @@ import * as discordVerifiedUsers from '../routes/integrations/discord/verifiedUs
 import * as discordVerification from '../routes/integrations/discord/verification';
 import * as discordOAuthCallback from '../routes/integrations/discord/oauth/callback';
 import * as discordOAuthStart from '../routes/integrations/discord/oauth/start';
+import * as xOAuthCallback from '../routes/integrations/x/oauth/callback';
+import * as xOAuthStart from '../routes/integrations/x/oauth/start';
+import * as xStatus from '../routes/integrations/x/status';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
@@ -88,6 +91,9 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'integrations/discord/verification': discordVerification,
   'integrations/discord/oauth/callback': discordOAuthCallback,
   'integrations/discord/oauth/start': discordOAuthStart,
+  'integrations/x/oauth/callback': xOAuthCallback,
+  'integrations/x/oauth/start': xOAuthStart,
+  'integrations/x/status': xStatus,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,

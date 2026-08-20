@@ -16,6 +16,9 @@ const LIMITS = {
   'presale-quote': { max: 20, windowMs: 60 * 1000 },
   'presale-verify': { max: 20, windowMs: 60 * 1000 },
   'cherry-embed-token': { max: 20, windowMs: 60 * 1000 },
+  'x-oauth-start': { max: 10, windowMs: 60 * 1000 },
+  'x-oauth-callback': { max: 10, windowMs: 60 * 1000 },
+  'x-follow-check': { max: 2, windowMs: 15 * 60 * 1000 },
 };
 
 // Returns true when the call is allowed; false when the caller should get 429.

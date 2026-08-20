@@ -177,6 +177,18 @@ test('presale delivery migration makes Token-2022 delivery traceable and retryab
   assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS battlecity_presale_allocations_delivery_signature_idx/);
 });
 
+test('X connection migration enforces one validated account per player', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/019_x_connections.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_x_connections\b/);
+  assert.match(sql, /player_id TEXT PRIMARY KEY REFERENCES battlecity_players\(id\) ON DELETE CASCADE/);
+  assert.match(sql, /x_user_id TEXT UNIQUE NOT NULL CHECK/);
+  assert.match(sql, /x_username TEXT NOT NULL CHECK/);
+  assert.match(sql, /follows_battlecities BOOLEAN NOT NULL DEFAULT FALSE/);
+});
+
 test('stores use migrations and the shared pool instead of request-time DDL', async () => {
   const folders = ['stores', 'services'];
   for (const folder of folders) {

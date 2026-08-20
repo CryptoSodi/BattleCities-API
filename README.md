@@ -103,6 +103,15 @@ DISCORD_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/discord
 
 # Shared only with the Discord bot service; never the frontend
 DISCORD_BOT_SERVICE_TOKEN=<new strong random secret>
+
+# X OAuth follow connection
+X_CLIENT_ID=<X OAuth 2.0 client ID>
+X_CLIENT_SECRET=<X OAuth 2.0 client secret>
+X_BEARER_TOKEN=<X app-only bearer token>
+X_OAUTH_STATE_SECRET=<new strong random secret>
+X_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/x/oauth/callback
+X_BATTLECITIES_USERNAME=BattleCitiesHQ
+X_BATTLECITIES_USER_ID=<optional stable numeric X user ID>
 ```
 
 `DISCORD_APPLICATION_PUBLIC_KEY` is public application metadata, but every

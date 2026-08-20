@@ -8,6 +8,7 @@ loadLocalEnv();
 const googleAuth = require('../src/services/googleAuth');
 const storageConfig = require('../src/config/storageConfig');
 const presaleService = require('../src/services/presaleService');
+const xOAuth = require('../src/services/xOAuth');
 
 const databaseUrl = storageConfig.getDatabaseUrl();
 const database = describeDatabase(databaseUrl);
@@ -52,6 +53,15 @@ const status = {
     pythApiKey: isConfigured('BATTLECITY_PRESALE_PYTH_API_KEY'),
     quoteSecret: isConfigured('BATTLECITY_PRESALE_QUOTE_SECRET'),
   },
+  x: {
+    configured: xOAuth.isConfigured(),
+    clientId: isConfigured('X_CLIENT_ID'),
+    clientSecret: isConfigured('X_CLIENT_SECRET'),
+    bearerToken: isConfigured('X_BEARER_TOKEN'),
+    stateSecret: isConfigured('X_OAUTH_STATE_SECRET'),
+    redirectUri: process.env.X_OAUTH_REDIRECT_URI || null,
+    target: process.env.X_BATTLECITIES_USER_ID || process.env.X_BATTLECITIES_USERNAME || null,
+  },
 };
 
 console.log(JSON.stringify(status, null, 2));
@@ -61,7 +71,8 @@ if (
   !status.google.configured ||
   !status.cherry.configured ||
   !status.broadcaster.configured ||
-  !status.presale.configured
+  !status.presale.configured ||
+  !status.x.configured
 ) {
   process.exitCode = 1;
 }
