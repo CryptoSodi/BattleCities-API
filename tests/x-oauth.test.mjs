@@ -88,6 +88,24 @@ test('X OAuth rejects state tampering, session swapping, weak secrets, and unsaf
   });
 });
 
+test('X OAuth returns to the public site without changing game OAuth redirects', () => {
+  const originalXBase = process.env.BATTLECITY_X_WEB_BASE_URL;
+  const originalGameBase = process.env.BATTLECITY_WEB_BASE_URL;
+  try {
+    process.env.BATTLECITY_WEB_BASE_URL = 'https://play.battlecities.com';
+    process.env.BATTLECITY_X_WEB_BASE_URL = 'https://battlecities.com';
+    assert.equal(
+      xOAuth.createFrontendRedirect('/?xConnected=1'),
+      'https://battlecities.com/?xConnected=1',
+    );
+  } finally {
+    if (originalXBase === undefined) delete process.env.BATTLECITY_X_WEB_BASE_URL;
+    else process.env.BATTLECITY_X_WEB_BASE_URL = originalXBase;
+    if (originalGameBase === undefined) delete process.env.BATTLECITY_WEB_BASE_URL;
+    else process.env.BATTLECITY_WEB_BASE_URL = originalGameBase;
+  }
+});
+
 async function withTestEnv(operation) {
   const original = new Map();
   for (const [key, value] of Object.entries(TEST_ENV)) {

@@ -171,8 +171,12 @@ Useful variables:
 - `BATTLECITY_API_BASE_URL`: browser API origin. Production defaults to
   same-origin until this is set to `https://api.battlecities.com` in the
   frontend Vercel project.
-- `BATTLECITY_WEB_BASE_URL`: game origin used after API-hosted OAuth callbacks;
-  set it to `https://play.battlecities.com` in production.
+- `BATTLECITY_WEB_BASE_URL`: game origin used after API-hosted Google and
+  Discord OAuth callbacks; set it to `https://play.battlecities.com` in
+  production.
+- `BATTLECITY_X_WEB_BASE_URL`: public-site origin used after the read-only X
+  connection/follow verification callback; set it to `https://battlecities.com`
+  in production.
 - `BATTLECITY_EVENT_ADMIN_SECRET`: bearer token required to approve final event
   prize allocations after an event ends.
 - `BROADCASTER_BASE_URL`: loopback broadcaster-control origin; embedded

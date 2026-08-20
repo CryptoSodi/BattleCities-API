@@ -231,7 +231,11 @@ function isValidRedirectUri(value) {
 }
 
 function createFrontendRedirect(pathname) {
-  const baseUrl = String(process.env.BATTLECITY_WEB_BASE_URL || '').trim();
+  // X connection belongs to the public site. Keep this separate from the
+  // game-wide OAuth return URL, which is also used by Google and Discord.
+  const baseUrl = String(
+    process.env.BATTLECITY_X_WEB_BASE_URL || process.env.BATTLECITY_WEB_BASE_URL || '',
+  ).trim();
   return baseUrl === '' ? pathname : new URL(pathname, `${baseUrl.replace(/\/+$/, '')}/`).toString();
 }
 
