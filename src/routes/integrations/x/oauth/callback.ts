@@ -24,7 +24,12 @@ export async function GET(request: Request): Promise<Response> {
       const state = await xConnectionStore.readConnection(completed.playerId);
       const task = await repostTasks.activeForPlayer(completed.playerId);
       if (!linked || !state.follows || !task || String(linked.x_user_id || linked.xUserId) !== completed.profile.id) return redirectError('task');
-      await xOAuth.repostWithUserToken(completed.accessToken, completed.profile.id, task.postId);
+      try {
+        await xOAuth.repostWithUserToken(completed.accessToken, completed.profile.id, task.postId);
+      } catch (error) {
+        console.warn('[battlecities-api] X repost failed', error);
+        return redirectError('repost');
+      }
       const claim = await repostTasks.claim({ id: completed.playerId }, completed.profile.id, task.id);
       if (!claim.ok || !claim.granted) return redirectError('task');
       return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xRepostClaimed=1'));
