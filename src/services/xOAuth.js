@@ -40,7 +40,9 @@ function createAuthorizationUrl(origin, playerId, sessionId) {
     response_type: 'code',
     client_id: config.clientId,
     redirect_uri: redirectUri,
-    scope: 'users.read',
+    // X requires both read scopes for the authenticated /2/users/me lookup.
+    // Keep this deliberately read-only: the app never posts or follows for a player.
+    scope: 'tweet.read users.read',
     state: createState({
       playerId,
       sessionBinding: createSessionBinding(sessionId),

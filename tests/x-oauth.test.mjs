@@ -33,7 +33,7 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
     assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(
       authorizationUrl.searchParams.get('scope'),
-      'users.read',
+      'tweet.read users.read',
     );
 
     const requests = [];
