@@ -37,6 +37,9 @@ async function create(adminPlayerId, post) {
 async function activeForPlayer(playerId) {
   return (await list(playerId)).find(task => task.active && !task.claimed) || null;
 }
+async function activeForStatus(playerId) {
+  return (await list(playerId)).find(task => task.active) || null;
+}
 async function claim(player, xUserId, taskId) {
   if (!enabled()) throw Object.assign(new Error('Database is required'), { code: 'DATABASE_REQUIRED' });
   await database.assertMigrationsApplied();
@@ -50,4 +53,4 @@ async function claim(player, xUserId, taskId) {
     return { ok:true, granted:true, taskId:task.id };
   });
 }
-module.exports = { activeForPlayer, claim, create, list };
+module.exports = { activeForPlayer, activeForStatus, claim, create, list };

@@ -19,6 +19,6 @@ export async function GET(request: Request): Promise<Response> {
   return createJsonResponse(request, {
     authenticated: true,
     ...state,
-    repostTask: state.follows ? await repostTasks.activeForPlayer(player.id) : null,
+    repostTask: state.follows ? await repostTasks.activeForStatus(player.id) : null,
   });
 }
