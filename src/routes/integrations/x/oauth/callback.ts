@@ -5,7 +5,6 @@ const rateLimiter = require('../../../../services/rateLimiter');
 const sessionStore = require('../../../../stores/sessionStore');
 const xConnectionStore = require('../../../../stores/xConnectionStore');
 const xOAuth = require('../../../../services/xOAuth');
-const repostTasks = require('../../../../stores/xRepostTaskStore');
 
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -19,35 +18,6 @@ export async function GET(request: Request): Promise<Response> {
     if (!session?.playerId) return redirectError('login');
     const completed = await xOAuth.completeConnection({ code, state, sessionId });
     if (completed.playerId !== session.playerId) return redirectError('state');
-    if (completed.purpose === 'repost') {
-      const linked = await xConnectionStore.readLinkedAccount(completed.playerId);
-      const state = await xConnectionStore.readConnection(completed.playerId);
-      const task = await repostTasks.activeForPlayer(completed.playerId);
-      if (!linked || !state.follows || !task || String(linked.x_user_id || linked.xUserId) !== completed.profile.id) return redirectError('task');
-      try {
-        await xOAuth.repostWithUserToken(completed.accessToken, completed.profile.id, task.postId);
-      } catch (error) {
-        console.warn('[battlecities-api] X repost failed', error);
-        return redirectError('repost');
-      }
-      const claim = await repostTasks.claim({ id: completed.playerId }, completed.profile.id, task.id);
-      if (!claim.ok || !claim.granted) return redirectError('task');
-      return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xRepostClaimed=1'));
-    }
-    if (completed.purpose === xOAuth.FOLLOW_VERIFICATION_PURPOSE) {
-      if (!rateLimiter.allow('x-follow-check', completed.playerId)) return redirectError('rate');
-      const linkedAccount = await xConnectionStore.readLinkedAccount(completed.playerId);
-      if (linkedAccount === null || String(linkedAccount.x_user_id || linkedAccount.xUserId) !== completed.profile.id) {
-        return redirectError('account');
-      }
-      const follows = await xOAuth.verifyFollowWithUserToken(completed.accessToken);
-      await xConnectionStore.recordFollowCheckAndGrantReward(
-        { id: completed.playerId },
-        completed.profile.id,
-        follows,
-      );
-      return xOAuth.redirectResponse(xOAuth.createFrontendRedirect('/?xFollowVerified=1'));
-    }
     const result = await xConnectionStore.linkAccount(
       completed.playerId,
       completed.profile.id,

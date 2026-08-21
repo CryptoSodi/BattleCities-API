@@ -11,9 +11,7 @@ const STATE_VERSION = 1;
 // that limit for real Battle Cities player IDs.
 const MAX_STATE_LENGTH = 500;
 const MAX_CODE_LENGTH = 2048;
-const BATTLECITIES_X_USER_ID = '2070252693130731520';
 const CONNECTION_PURPOSE = 'connect';
-const FOLLOW_VERIFICATION_PURPOSE = 'verify-follow';
 
 function getConfig() {
   return {
@@ -21,9 +19,6 @@ function getConfig() {
     clientSecret: String(process.env.X_CLIENT_SECRET || '').trim(),
     redirectUri: String(process.env.X_OAUTH_REDIRECT_URI || '').trim(),
     stateSecret: String(process.env.X_OAUTH_STATE_SECRET || '').trim(),
-    targetUserId: String(
-      process.env.X_BATTLECITIES_USER_ID || BATTLECITIES_X_USER_ID,
-    ).trim(),
   };
 }
 
@@ -33,29 +28,24 @@ function isConfigured() {
     config.clientId !== '' &&
     config.clientSecret !== '' &&
     Buffer.byteLength(config.stateSecret, 'utf8') >= 32 &&
-    isValidRedirectUri(config.redirectUri) &&
-    /^\d{1,20}$/.test(config.targetUserId)
+    isValidRedirectUri(config.redirectUri)
   );
 }
 
-function createAuthorizationUrl(origin, playerId, sessionId, purpose = CONNECTION_PURPOSE) {
+function createAuthorizationUrl(origin, playerId, sessionId) {
   const config = requireConfig();
-  if (!isSupportedPurpose(purpose)) throw new Error('Invalid X OAuth purpose');
   const redirectUri = getRedirectUri(origin);
   const codeVerifier = crypto.randomBytes(32).toString('base64url');
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
     redirect_uri: redirectUri,
-    scope: 'tweet.read tweet.write users.read follows.read',
+    scope: 'users.read',
     state: createState({
       playerId,
       sessionBinding: createSessionBinding(sessionId),
       redirectUri,
       codeVerifier,
-      // X limits state values to 500 characters; compact purpose markers keep
-      // the encrypted, session-bound state within that limit.
-      purpose: purpose === 'repost' ? 'r' : purpose === FOLLOW_VERIFICATION_PURPOSE ? 'f' : undefined,
     }),
     code_challenge: crypto
       .createHash('sha256')
@@ -84,66 +74,8 @@ async function completeConnection({ code, state, sessionId }) {
   );
   return {
     playerId: statePayload.playerId,
-    purpose: statePayload.purpose === 'r'
-      ? 'repost'
-      : statePayload.purpose === 'f'
-        ? FOLLOW_VERIFICATION_PURPOSE
-        : CONNECTION_PURPOSE,
     profile: await fetchCurrentUser(accessToken),
-    // This is intentionally returned only to the OAuth callback. It is never
-    // persisted, sent to the browser, or logged.
-    accessToken,
   };
-}
-
-async function repostWithUserToken(accessToken, userId, postId) {
-  if (typeof accessToken !== 'string' || accessToken === '') {
-    throw new Error('Invalid X user access token');
-  }
-  if (!/^\d{1,20}$/.test(String(userId)) || !/^\d{1,20}$/.test(String(postId))) {
-    throw new Error('Invalid X repost target');
-  }
-  const response = await fetch(
-    `https://api.x.com/2/users/${encodeURIComponent(userId)}/retweets`,
-    {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ tweet_id: postId }),
-    },
-  );
-  const body = await response.json().catch(() => null);
-  if (!response.ok || body?.data?.retweeted !== true) {
-    throw createXOperationError(response.status, body, 'X repost was not confirmed');
-  }
-}
-
-function createXOperationError(status, body, prefix) {
-  const title = typeof body?.title === 'string'
-    ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
-    : 'request failed';
-  return new Error(`${prefix} (${status}: ${title})`);
-}
-
-async function verifyFollowWithUserToken(accessToken) {
-  if (typeof accessToken !== 'string' || accessToken === '') {
-    throw new Error('Invalid X user access token');
-  }
-  const { targetUserId } = requireConfig();
-  // One user resource, with the authenticated user's relationship to it. Do
-  // not use paginated followers/following lists: X bills those per returned
-  // account and they are unsuitable for a reward verification flow.
-  const url = new URL(`https://api.x.com/2/users/${encodeURIComponent(targetUserId)}`);
-  url.searchParams.set('user.fields', 'connection_status');
-  const response = await fetch(url, {
-    headers: { authorization: `Bearer ${accessToken}` },
-  });
-  if (!response.ok) throw await createXApiError(response, 'X relationship verification failed');
-  const body = await response.json();
-  return Array.isArray(body?.data?.connection_status)
-    && body.data.connection_status.includes('following');
 }
 
 async function exchangeCode(code, redirectUri, codeVerifier) {
@@ -183,16 +115,6 @@ async function fetchCurrentUser(accessToken) {
     throw new Error('Invalid X profile');
   }
   return profile;
-}
-
-async function createXApiError(response, prefix) {
-  // Preserve only a short, sanitized upstream status for operations. Never
-  // emit the body, URL, or authorization header.
-  const body = await response.json().catch(() => null);
-  const title = typeof body?.title === 'string'
-    ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
-    : 'request failed';
-  return new Error(`${prefix} (${response.status}: ${title})`);
 }
 
 function createState(payload) {
@@ -241,9 +163,6 @@ function verifyState(state) {
       typeof body.sessionBinding !== 'string' ||
       typeof body.redirectUri !== 'string' ||
       typeof body.codeVerifier !== 'string' ||
-      // Accept the full legacy value briefly for in-flight states created by
-      // the previous deployment; new states use a compact marker.
-      (body.purpose !== undefined && body.purpose !== 'r' && body.purpose !== 'f' && !isSupportedPurpose(body.purpose)) ||
       typeof body.issuedAt !== 'number' ||
       body.issuedAt > Date.now() ||
       Date.now() - body.issuedAt > STATE_TTL_MS
@@ -275,14 +194,6 @@ function createFrontendRedirect(pathname) {
     process.env.BATTLECITY_X_WEB_BASE_URL || process.env.BATTLECITY_WEB_BASE_URL || '',
   ).trim();
   return baseUrl === '' ? pathname : new URL(pathname, `${baseUrl.replace(/\/+$/, '')}/`).toString();
-}
-
-function isSupportedPurpose(value) {
-  // Keep the OAuth state purpose explicit so future one-resource campaign
-  // checks (post/reply verification) cannot accidentally enter this flow.
-  return value === CONNECTION_PURPOSE
-    || value === FOLLOW_VERIFICATION_PURPOSE
-    || value === 'repost';
 }
 
 function redirectResponse(location) {
@@ -335,9 +246,6 @@ module.exports = {
   completeConnection,
   createAuthorizationUrl,
   createFrontendRedirect,
-  FOLLOW_VERIFICATION_PURPOSE,
   isConfigured,
   redirectResponse,
-  verifyFollowWithUserToken,
-  repostWithUserToken,
 };

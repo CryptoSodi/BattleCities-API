@@ -30,6 +30,8 @@ import * as discordOAuthStart from '../routes/integrations/discord/oauth/start';
 import * as xOAuthCallback from '../routes/integrations/x/oauth/callback';
 import * as xOAuthStart from '../routes/integrations/x/oauth/start';
 import * as xStatus from '../routes/integrations/x/status';
+import * as xVerifyFollow from '../routes/integrations/x/verifyFollow';
+import * as xVerifyRepost from '../routes/integrations/x/verifyRepost';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
@@ -99,6 +101,8 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'integrations/x/oauth/callback': xOAuthCallback,
   'integrations/x/oauth/start': xOAuthStart,
   'integrations/x/status': xStatus,
+  'integrations/x/verify-follow': xVerifyFollow,
+  'integrations/x/verify-repost': xVerifyRepost,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,

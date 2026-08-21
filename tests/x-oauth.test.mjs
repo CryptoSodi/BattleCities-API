@@ -30,30 +30,10 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
     assert.ok(state.length <= 500);
     assert.equal(state.includes(sessionId), false);
     assert.equal(state.split('.').length, 3);
-    const followVerificationState = new URL(
-      xOAuth.createAuthorizationUrl(
-        'https://api.battlecities.com',
-        playerId,
-        sessionId,
-        xOAuth.FOLLOW_VERIFICATION_PURPOSE,
-      ),
-    ).searchParams.get('state');
-    assert.ok(followVerificationState);
-    assert.ok(followVerificationState.length <= 500);
-    const repostState = new URL(
-      xOAuth.createAuthorizationUrl(
-        'https://api.battlecities.com',
-        playerId,
-        sessionId,
-        'repost',
-      ),
-    ).searchParams.get('state');
-    assert.ok(repostState);
-    assert.ok(repostState.length <= 500);
     assert.equal(authorizationUrl.searchParams.get('code_challenge_method'), 'S256');
     assert.equal(
       authorizationUrl.searchParams.get('scope'),
-      'tweet.read tweet.write users.read follows.read',
+      'users.read',
     );
 
     const requests = [];
@@ -73,12 +53,6 @@ test('X OAuth keeps session and PKCE values opaque and uses confidential-client 
       });
       assert.equal(completed.playerId, playerId);
       assert.equal(completed.profile.id, '123456789');
-      const repostCompleted = await xOAuth.completeConnection({
-        code: 'authorization-code',
-        state: repostState,
-        sessionId,
-      });
-      assert.equal(repostCompleted.purpose, 'repost');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -132,82 +106,6 @@ test('X OAuth returns to the public site without changing game OAuth redirects',
   }
 });
 
-test('X follow verification reads only the Battle Cities user resource with user context', async () => {
-  await withTestEnv(async () => {
-    const requests = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url, options = {}) => {
-      requests.push({ url: String(url), options });
-      return Response.json({ data: { connection_status: ['following'] } });
-    };
-    try {
-      assert.equal(await xOAuth.verifyFollowWithUserToken('user-access-token'), true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-    assert.match(requests[0].url, /\/2\/users\/2070252693130731520/);
-    assert.match(requests[0].url, /user.fields=connection_status/);
-    assert.equal(requests[0].options.headers.authorization, 'Bearer user-access-token');
-    assert.equal(requests.length, 1);
-  });
-});
-
-test('X follow verification exposes a safe upstream failure diagnostic', async () => {
-  await withTestEnv(async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => Response.json(
-      { title: 'Unauthorized', detail: 'Sensitive content must never be surfaced.' },
-      { status: 401 },
-    );
-    try {
-      await assert.rejects(
-        xOAuth.verifyFollowWithUserToken('user-access-token'),
-        /X relationship verification failed \(401: Unauthorized\)/,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
-test('X repost uses the current user token and only rewards a confirmed repost', async () => {
-  await withTestEnv(async () => {
-    const requests = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url, options = {}) => {
-      requests.push({ url: String(url), options });
-      return Response.json({ data: { retweeted: true } });
-    };
-    try {
-      await xOAuth.repostWithUserToken('user-access-token', '123456789', '987654321');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-    assert.equal(requests.length, 1);
-    assert.match(requests[0].url, /\/2\/users\/123456789\/retweets$/);
-    assert.equal(requests[0].options.method, 'POST');
-    assert.equal(requests[0].options.headers.authorization, 'Bearer user-access-token');
-    assert.equal(requests[0].options.body, JSON.stringify({ tweet_id: '987654321' }));
-  });
-});
-
-test('X repost exposes a safe upstream error when X declines the request', async () => {
-  await withTestEnv(async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => Response.json(
-      { title: 'Forbidden!', detail: 'Never surface sensitive upstream details.' },
-      { status: 403 },
-    );
-    try {
-      await assert.rejects(
-        xOAuth.repostWithUserToken('user-access-token', '123456789', '987654321'),
-        /X repost was not confirmed \(403: Forbidden\)/,
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
 
 async function withTestEnv(operation) {
   const original = new Map();
