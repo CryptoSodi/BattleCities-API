@@ -23,6 +23,11 @@ async function hasReposted(postId, xUserId) {
   const users = Array.isArray(body?.users) ? body.users : [];
   return users.some((user) => extractUserId(user) === String(xUserId));
 }
+async function hasCommented(postId, xUserId) {
+  if (!/^\d{1,20}$/.test(String(postId)) || !/^\d{1,20}$/.test(String(xUserId))) throw new Error('Invalid X comment verification target');
+  const body = await request('/twitter/tweet/replies', { tweetId: String(postId), queryType: 'Latest' });
+  return (Array.isArray(body?.tweets) ? body.tweets : []).some(tweet => extractUserId(tweet?.author || tweet?.user || tweet) === String(xUserId) || String(tweet?.authorId || tweet?.author_id || '') === String(xUserId));
+}
 
 async function request(pathname, query) {
   const key = String(process.env.TWITTERAPI_IO_KEY || '').trim();
@@ -55,4 +60,4 @@ function createError(status, body) {
   return new Error(`TwitterAPI request failed (${status}: ${detail})`);
 }
 
-module.exports = { checkFollowRelationship, hasReposted, isConfigured };
+module.exports = { checkFollowRelationship, hasReposted, hasCommented, isConfigured };

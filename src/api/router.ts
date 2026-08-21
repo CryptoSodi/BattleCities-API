@@ -9,6 +9,7 @@ import * as adminPlayers from '../routes/admin/players';
 import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
 import * as adminLiveUsers from '../routes/admin/liveUsers';
 import * as adminXRepostTasks from '../routes/admin/xRepostTasks';
+import * as adminXCommentTasks from '../routes/admin/xCommentTasks';
 import * as adminReplays from '../routes/admin/replays';
 import * as adminSession from '../routes/admin/session';
 import * as adminTournaments from '../routes/admin/tournaments';
@@ -32,6 +33,7 @@ import * as xOAuthStart from '../routes/integrations/x/oauth/start';
 import * as xStatus from '../routes/integrations/x/status';
 import * as xVerifyFollow from '../routes/integrations/x/verifyFollow';
 import * as xVerifyRepost from '../routes/integrations/x/verifyRepost';
+import * as xVerifyComment from '../routes/integrations/x/verifyComment';
 import * as matchSubmit from '../routes/matches/submit';
 import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
@@ -70,6 +72,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
   'admin/site-settings/live-users': adminLiveUsers,
   'admin/x/repost-tasks': adminXRepostTasks,
+  'admin/x/comment-tasks': adminXCommentTasks,
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
   'admin/replays': adminReplays,
@@ -103,6 +106,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'integrations/x/status': xStatus,
   'integrations/x/verify-follow': xVerifyFollow,
   'integrations/x/verify-repost': xVerifyRepost,
+  'integrations/x/verify-comment': xVerifyComment,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   phases,

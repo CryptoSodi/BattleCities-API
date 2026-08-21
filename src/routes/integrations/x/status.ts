@@ -4,6 +4,7 @@ import { createJsonResponse, createOptionsResponse, resolveSessionPlayer } from 
 
 const xConnectionStore = require('../../../stores/xConnectionStore');
 const repostTasks = require('../../../stores/xRepostTaskStore');
+const commentTasks = require('../../../stores/xCommentTaskStore');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -20,5 +21,6 @@ export async function GET(request: Request): Promise<Response> {
     authenticated: true,
     ...state,
     repostTask: state.follows ? await repostTasks.activeForStatus(player.id) : null,
+    commentTask: state.follows ? await commentTasks.activeForStatus(player.id) : null,
   });
 }
