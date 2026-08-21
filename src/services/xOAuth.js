@@ -116,8 +116,15 @@ async function repostWithUserToken(accessToken, userId, postId) {
   );
   const body = await response.json().catch(() => null);
   if (!response.ok || body?.data?.retweeted !== true) {
-    throw new Error('X repost was not confirmed');
+    throw createXOperationError(response.status, body, 'X repost was not confirmed');
   }
+}
+
+function createXOperationError(status, body, prefix) {
+  const title = typeof body?.title === 'string'
+    ? body.title.replace(/[^a-z0-9 -]/gi, '').slice(0, 80)
+    : 'request failed';
+  return new Error(`${prefix} (${status}: ${title})`);
 }
 
 async function verifyFollowWithUserToken(accessToken) {

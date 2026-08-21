@@ -191,6 +191,24 @@ test('X repost uses the current user token and only rewards a confirmed repost',
   });
 });
 
+test('X repost exposes a safe upstream error when X declines the request', async () => {
+  await withTestEnv(async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json(
+      { title: 'Forbidden!', detail: 'Never surface sensitive upstream details.' },
+      { status: 403 },
+    );
+    try {
+      await assert.rejects(
+        xOAuth.repostWithUserToken('user-access-token', '123456789', '987654321'),
+        /X repost was not confirmed \(403: Forbidden\)/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 async function withTestEnv(operation) {
   const original = new Map();
   for (const [key, value] of Object.entries(TEST_ENV)) {
