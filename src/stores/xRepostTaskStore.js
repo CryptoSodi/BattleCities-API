@@ -6,9 +6,37 @@ const economyStore = require('./economyStore');
 function enabled() { return storageConfig.hasDatabaseConfig(); }
 function parsePost(value) {
   const raw = String(value || '').trim();
-  const match = raw.match(/(?:status\/)?(\d{1,20})$/);
-  if (!match) throw Object.assign(new Error('Provide an X post URL or post ID'), { code: 'INVALID_X_TASK' });
-  return { id: match[1], url: raw.startsWith('http') ? raw : `https://x.com/BattleCitiesHQ/status/${match[1]}` };
+  if (/^\d{1,20}$/.test(raw)) {
+    return { id: raw, url: `https://x.com/${battleCitiesUsername()}/status/${raw}` };
+  }
+
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw invalidTask();
+  }
+
+  if (!/^(?:www\.)?(?:x|twitter)\.com$/i.test(url.hostname)) throw invalidTask();
+  const match = url.pathname.match(/^\/([^/]+)\/status\/(\d{1,20})\/?$/i);
+  if (!match || match[1].toLowerCase() !== battleCitiesUsername().toLowerCase()) {
+    throw invalidTask();
+  }
+  return {
+    id: match[2],
+    url: `https://x.com/${battleCitiesUsername()}/status/${match[2]}`,
+  };
+}
+
+function battleCitiesUsername() {
+  return String(process.env.BATTLECITY_X_USERNAME || 'BattleCitiesHQ').trim().replace(/^@/, '');
+}
+
+function invalidTask() {
+  return Object.assign(
+    new Error(`Provide a post URL from @${battleCitiesUsername()} or its post ID`),
+    { code: 'INVALID_X_TASK' },
+  );
 }
 async function list(playerId = null) {
   if (!enabled()) return [];
@@ -53,4 +81,4 @@ async function claim(player, xUserId, taskId) {
     return { ok:true, granted:true, taskId:task.id };
   });
 }
-module.exports = { activeForPlayer, activeForStatus, claim, create, list };
+module.exports = { activeForPlayer, activeForStatus, claim, create, list, parsePost };
