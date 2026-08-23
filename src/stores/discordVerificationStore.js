@@ -1,11 +1,15 @@
 const crypto = require('crypto');
 const database = require('../database');
 const storageConfig = require('../config/storageConfig');
+const economyStore = require('./economyStore');
+const playerStore = require('./playerStore');
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const DISCORD_FOLLOW_FUEL_REWARD = 5;
 const localByPlayerId = new Map();
 const localPlayerIdByDiscordUserId = new Map();
+const localRewardedPlayerIds = new Set();
 
 function hasPersistentConfig() {
   return storageConfig.hasDatabaseConfig();
@@ -39,6 +43,7 @@ function toPublicState(record) {
     verified: record?.verifiedAt !== null && record?.verifiedAt !== undefined,
     discordUsername: record?.discordUsername || null,
     verifiedAt: record?.verifiedAt || null,
+    rewardClaimed: Boolean(record?.rewardClaimed),
     expiresAt:
       record?.verifiedAt === null || record?.verifiedAt === undefined
         ? record?.codeExpiresAt || null
@@ -53,9 +58,13 @@ async function readVerification(playerId) {
 
   await database.assertMigrationsApplied();
   const result = await database.getPool().query(
-    `SELECT discord_username, code_expires_at, verified_at
+    `SELECT v.discord_username, v.code_expires_at, v.verified_at,
+       EXISTS(
+         SELECT 1 FROM battlecity_discord_follow_rewards r
+         WHERE r.player_id = v.player_id
+       ) AS reward_claimed
        FROM battlecity_discord_verifications
-       WHERE player_id = $1`,
+       v WHERE v.player_id = $1`,
     [playerId],
   );
   return toPublicState(
@@ -64,6 +73,7 @@ async function readVerification(playerId) {
           discordUsername: result.rows[0].discord_username,
           codeExpiresAt: toIso(result.rows[0].code_expires_at),
           verifiedAt: toIso(result.rows[0].verified_at),
+          rewardClaimed: result.rows[0].reward_claimed,
         }
       : null,
   );
@@ -180,7 +190,11 @@ async function verifyCode(code, discordUserId, discordUsername) {
         codeRecord.player_id,
       ],
     );
-    return { ok: true, playerId: codeRecord.player_id, verifiedAt };
+    const rewardGranted = await grantFollowReward(
+      codeRecord.player_id,
+      discordUserId,
+    );
+    return { ok: true, playerId: codeRecord.player_id, verifiedAt, rewardGranted };
   });
 }
 
@@ -228,7 +242,33 @@ async function verifyDiscordAccount(playerId, discordUserId, discordUsername) {
         verifiedAt,
       ],
     );
-    return { ok: true, playerId, verifiedAt };
+    const rewardGranted = await grantFollowReward(playerId, discordUserId);
+    return { ok: true, playerId, verifiedAt, rewardGranted };
+  });
+}
+
+async function claimFollowReward(player) {
+  if (!player?.id) return { ok: false, error: 'Invalid player' };
+  if (!hasPersistentConfig()) {
+    const record = localByPlayerId.get(player.id);
+    if (!record?.verifiedAt || !record.discordUserId) {
+      return { ok: false, error: 'Discord membership has not been verified' };
+    }
+    return { ok: true, granted: await grantLocalFollowReward(player.id) };
+  }
+
+  await database.assertMigrationsApplied();
+  return database.withTransaction(async () => {
+    const result = await database.getPool().query(
+      `SELECT discord_user_id FROM battlecity_discord_verifications
+       WHERE player_id = $1 AND verified_at IS NOT NULL FOR UPDATE`,
+      [player.id],
+    );
+    const discordUserId = result.rows[0]?.discord_user_id;
+    if (!discordUserId) {
+      return { ok: false, error: 'Discord membership has not been verified' };
+    }
+    return { ok: true, granted: await grantFollowReward(player.id, discordUserId) };
   });
 }
 
@@ -250,7 +290,7 @@ function createLocalVerificationCode(playerId) {
   return { ok: true, code, expiresAt };
 }
 
-function verifyLocalCode(code, discordUserId, discordUsername) {
+async function verifyLocalCode(code, discordUserId, discordUsername) {
   const linkedPlayerId = localPlayerIdByDiscordUserId.get(discordUserId);
   if (linkedPlayerId) {
     return {
@@ -277,10 +317,11 @@ function verifyLocalCode(code, discordUserId, discordUsername) {
   record.discordUsername = normalizeDiscordUsername(discordUsername);
   record.verifiedAt = verifiedAt;
   localPlayerIdByDiscordUserId.set(discordUserId, playerId);
-  return { ok: true, playerId, verifiedAt };
+  const rewardGranted = await grantLocalFollowReward(playerId);
+  return { ok: true, playerId, verifiedAt, rewardGranted };
 }
 
-function verifyLocalDiscordAccount(playerId, discordUserId, discordUsername) {
+async function verifyLocalDiscordAccount(playerId, discordUserId, discordUsername) {
   const linkedPlayerId = localPlayerIdByDiscordUserId.get(discordUserId);
   if (linkedPlayerId && linkedPlayerId !== playerId) {
     return {
@@ -298,7 +339,43 @@ function verifyLocalDiscordAccount(playerId, discordUserId, discordUsername) {
     verifiedAt,
   });
   localPlayerIdByDiscordUserId.set(discordUserId, playerId);
-  return { ok: true, playerId, verifiedAt };
+  const rewardGranted = await grantLocalFollowReward(playerId);
+  return { ok: true, playerId, verifiedAt, rewardGranted };
+}
+
+async function grantFollowReward(playerId, discordUserId) {
+  const receipt = await database.getPool().query(
+    `INSERT INTO battlecity_discord_follow_rewards
+       (player_id, discord_user_id, fuel_amount)
+     VALUES ($1, $2, $3)
+     ON CONFLICT DO NOTHING
+     RETURNING player_id`,
+    [playerId, discordUserId, DISCORD_FOLLOW_FUEL_REWARD],
+  );
+  if (receipt.rowCount === 0) return false;
+  const player = await playerStore.readPlayer(playerId);
+  if (player === null) throw new Error('Verified player no longer exists');
+  await economyStore.creditFuel(player, DISCORD_FOLLOW_FUEL_REWARD, {
+    reason: 'discord-follow-reward',
+    sourceType: 'discord-follow-reward',
+    sourceId: 'first-guild-verification',
+  });
+  return true;
+}
+
+async function grantLocalFollowReward(playerId) {
+  if (localRewardedPlayerIds.has(playerId)) return false;
+  const player = await playerStore.readPlayer(playerId);
+  if (player === null) return false;
+  await economyStore.creditFuel(player, DISCORD_FOLLOW_FUEL_REWARD, {
+    reason: 'discord-follow-reward',
+    sourceType: 'discord-follow-reward',
+    sourceId: 'first-guild-verification',
+  });
+  localRewardedPlayerIds.add(playerId);
+  const record = localByPlayerId.get(playerId);
+  if (record) record.rewardClaimed = true;
+  return true;
 }
 
 function normalizeDiscordUsername(value) {
@@ -316,6 +393,7 @@ function toIso(value) {
 
 module.exports = {
   createVerificationCode,
+  claimFollowReward,
   isDiscordUserVerified,
   readVerification,
   verifyDiscordAccount,

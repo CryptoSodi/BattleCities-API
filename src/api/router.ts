@@ -26,6 +26,7 @@ import * as health from '../routes/health';
 import * as discordInteractions from '../routes/integrations/discord/interactions';
 import * as discordVerifiedUsers from '../routes/integrations/discord/verifiedUsers';
 import * as discordVerification from '../routes/integrations/discord/verification';
+import * as discordClaimReward from '../routes/integrations/discord/claimReward';
 import * as discordOAuthCallback from '../routes/integrations/discord/oauth/callback';
 import * as discordOAuthStart from '../routes/integrations/discord/oauth/start';
 import * as xOAuthCallback from '../routes/integrations/x/oauth/callback';
@@ -99,6 +100,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   health,
   'integrations/discord/interactions': discordInteractions,
   'integrations/discord/verification': discordVerification,
+  'integrations/discord/claim-reward': discordClaimReward,
   'integrations/discord/oauth/callback': discordOAuthCallback,
   'integrations/discord/oauth/start': discordOAuthStart,
   'integrations/x/oauth/callback': xOAuthCallback,

@@ -199,6 +199,17 @@ test('X follow reward migration makes the five Fuel grant idempotent per player'
   assert.match(sql, /fuel_amount INTEGER NOT NULL CHECK \(fuel_amount = 5\)/);
 });
 
+test('Discord follow reward migration makes the five Fuel grant idempotent per player', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/024_discord_follow_rewards.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS battlecity_discord_follow_rewards\b/);
+  assert.match(sql, /player_id TEXT PRIMARY KEY REFERENCES battlecity_players\(id\) ON DELETE CASCADE/);
+  assert.match(sql, /discord_user_id TEXT NOT NULL UNIQUE/);
+  assert.match(sql, /fuel_amount INTEGER NOT NULL CHECK \(fuel_amount = 5\)/);
+});
+
 test('live users setting migration defaults the public counter to disabled', async () => {
   const sql = await fs.readFile(
     path.join(packageRoot, 'migrations/021_live_users_setting.sql'),
