@@ -14,9 +14,6 @@ export function OPTIONS(request: Request): Response {
 
 export async function POST(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);
-  if (player === null) {
-    return createJsonResponse(request, { error: 'Authentication required' }, 401);
-  }
 
   let body: any;
   try {
@@ -35,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
     return createJsonResponse(request, { error: 'Invalid notification device' }, 400);
   }
 
-  await pushDeviceStore.upsertDevice(player.id, {
+  await pushDeviceStore.upsertDevice(player?.id ?? null, {
     token: body.token,
     platform,
     permission,

@@ -18,7 +18,7 @@ async function upsertDevice(playerId, input) {
   const now = new Date().toISOString();
   const record = {
     token: input.token,
-    playerId,
+    playerId: typeof playerId === 'string' && playerId.trim() !== '' ? playerId : null,
     platform: input.platform,
     permission: input.permission,
     createdAt: now,
