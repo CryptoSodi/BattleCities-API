@@ -73,7 +73,11 @@ type RouteHandler = (request: Request) => Response | Promise<Response>;
 
 const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
-  'admin/notifications/test': adminNotifications,
+  'admin/notifications': adminNotifications,
+  'admin/notifications/test': {
+    OPTIONS: adminNotifications.OPTIONS,
+    POST: adminNotifications.TEST_POST,
+  },
   'admin/site-settings/live-users': adminLiveUsers,
   'admin/x/repost-tasks': adminXRepostTasks,
   'admin/x/comment-tasks': adminXCommentTasks,

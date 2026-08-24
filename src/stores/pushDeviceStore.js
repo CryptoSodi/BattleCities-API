@@ -77,26 +77,41 @@ async function readLocalRecords() {
 }
 
 async function listGrantedDevices(playerId) {
+  const hasPlayerFilter = typeof playerId === 'string' && playerId.trim() !== '';
   if (hasPersistentConfig()) {
     await database.assertMigrationsApplied();
     const result = await database.getPool().query(
       `
         SELECT token, platform
         FROM ${TABLE_NAME}
-        WHERE player_id = $1
-          AND permission_state = 'granted'
+        WHERE permission_state = 'granted'
+          ${hasPlayerFilter ? 'AND player_id = $1' : ''}
         ORDER BY updated_at DESC
       `,
-      [playerId],
+      hasPlayerFilter ? [playerId] : [],
     );
     return result.rows.map((row) => ({ token: row.token, platform: row.platform }));
   }
 
   const records = await readLocalRecords();
   return records
-    .filter((record) => record.playerId === playerId && record.permission === 'granted')
+    .filter((record) =>
+      record.permission === 'granted' && (!hasPlayerFilter || record.playerId === playerId),
+    )
     .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)))
     .map((record) => ({ token: record.token, platform: record.platform }));
 }
 
-module.exports = { upsertDevice, listGrantedDevices };
+async function getGrantedDeviceCount() {
+  if (hasPersistentConfig()) {
+    await database.assertMigrationsApplied();
+    const result = await database.getPool().query(
+      `SELECT COUNT(*)::int AS count FROM ${TABLE_NAME} WHERE permission_state = 'granted'`,
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  return (await readLocalRecords()).filter((record) => record.permission === 'granted').length;
+}
+
+module.exports = { upsertDevice, listGrantedDevices, getGrantedDeviceCount };

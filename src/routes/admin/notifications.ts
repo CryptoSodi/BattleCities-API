@@ -10,36 +10,55 @@ export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
 
-export async function POST(request: Request): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const authorization = await requireAdmin(request);
   if (isResponse(authorization)) return authorization;
+  return createJsonResponse(request, {
+    ok: true,
+    configured: firebaseMessaging.isConfigured(),
+    enabledDevices: await pushDevices.getGrantedDeviceCount(),
+  });
+}
 
+export async function POST(request: Request): Promise<Response> {
+  return sendNotification(request, false);
+}
+
+export async function TEST_POST(request: Request): Promise<Response> {
+  return sendNotification(request, true);
+}
+
+async function sendNotification(request: Request, isTest: boolean): Promise<Response> {
+  const authorization = await requireAdmin(request);
+  if (isResponse(authorization)) return authorization;
   try {
     const body = await request.json();
+    const audience = isTest ? 'player' : body?.audience;
     const playerId = typeof body?.playerId === 'string' ? body.playerId.trim() : '';
-    if (playerId === '') {
+    if (audience !== 'all' && audience !== 'player') {
+      return createJsonResponse(request, { ok: false, error: 'Choose a notification audience' }, 400);
+    }
+    if (audience === 'player' && playerId === '') {
       return createJsonResponse(request, { ok: false, error: 'A player is required' }, 400);
     }
     if (!firebaseMessaging.isConfigured()) {
       return createJsonResponse(request, { ok: false, error: 'Firebase messaging is not configured' }, 503);
     }
 
-    const devices = await pushDevices.listGrantedDevices(playerId);
+    const title = isTest ? 'Battle Cities test' : normalizeMessage(body?.title, 'Title', 80);
+    const message = isTest
+      ? 'Your Android notification connection is ready.'
+      : normalizeMessage(body?.message, 'Message', 240);
+    const devices = await pushDevices.listGrantedDevices(audience === 'player' ? playerId : undefined);
     if (devices.length === 0) {
       return createJsonResponse(
         request,
-        { ok: false, error: 'This player has no Android device with notifications enabled' },
+        { ok: false, error: 'No enabled Android devices match this audience' },
         404,
       );
     }
 
-    const delivery = await Promise.allSettled(
-      devices.map((device) => firebaseMessaging.sendToToken(device.token, {
-        title: 'Battle Cities test',
-        body: 'Your Android notification connection is ready.',
-        route: '/',
-      })),
-    );
+    const delivery = await sendInBatches(devices, title, message);
     const sent = delivery.filter((result) => result.status === 'fulfilled').length;
     const failed = delivery.length - sent;
     return createJsonResponse(request, { ok: sent > 0, sent, failed, devices: devices.length });
@@ -48,4 +67,23 @@ export async function POST(request: Request): Promise<Response> {
     if (response !== null) return response;
     throw error;
   }
+}
+
+function normalizeMessage(value: unknown, label: string, maximumLength: number): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized === '') throw new Error(`${label} is required`);
+  if (normalized.length > maximumLength) throw new Error(`${label} must be ${maximumLength} characters or fewer`);
+  return normalized;
+}
+
+async function sendInBatches(devices: any[], title: string, body: string): Promise<PromiseSettledResult<unknown>[]> {
+  const results: PromiseSettledResult<unknown>[] = [];
+  const batchSize = 25;
+  for (let index = 0; index < devices.length; index += batchSize) {
+    const batch = devices.slice(index, index + batchSize);
+    results.push(...await Promise.allSettled(
+      batch.map((device) => firebaseMessaging.sendToToken(device.token, { title, body, route: '/' })),
+    ));
+  }
+  return results;
 }
