@@ -8,6 +8,7 @@ import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
 import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
 import * as adminLiveUsers from '../routes/admin/liveUsers';
+import * as adminNotifications from '../routes/admin/notifications';
 import * as adminXRepostTasks from '../routes/admin/xRepostTasks';
 import * as adminXCommentTasks from '../routes/admin/xCommentTasks';
 import * as adminReplays from '../routes/admin/replays';
@@ -40,6 +41,7 @@ import * as multiplayerDirectStart from '../routes/multiplayer/directStart';
 import * as multiplayerArchives from '../routes/multiplayer/archives';
 import * as multiplayerEvents from '../routes/multiplayer/events';
 import * as multiplayerMatches from '../routes/multiplayer/matches';
+import * as notificationDevices from '../routes/notifications/devices';
 import * as phases from '../routes/phases';
 import * as player from '../routes/player';
 import * as presence from '../routes/presence';
@@ -71,6 +73,7 @@ type RouteHandler = (request: Request) => Response | Promise<Response>;
 
 const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/matches': adminMatches,
+  'admin/notifications/test': adminNotifications,
   'admin/site-settings/live-users': adminLiveUsers,
   'admin/x/repost-tasks': adminXRepostTasks,
   'admin/x/comment-tasks': adminXCommentTasks,
@@ -111,6 +114,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'integrations/x/verify-comment': xVerifyComment,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
+  'notifications/devices': notificationDevices,
   phases,
   player,
   presence,

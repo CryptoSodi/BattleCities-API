@@ -71,6 +71,20 @@ https://api.battlecities.com/api/ready
 The frontend Cloudflare Pages project only needs
 `BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
 
+### Firebase Cloud Messaging
+
+Android devices register their FCM token through the authenticated API. To let
+the API send notifications, add the complete Firebase Admin service-account
+JSON as an encrypted server-only environment variable:
+
+```env
+FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+Never place this value in the frontend, Android source tree, or a committed
+`.env` file. The API uses the Firebase HTTP v1 endpoint through
+`google-auth-library`.
+
 The combined multiplayer values are:
 
 ```env
