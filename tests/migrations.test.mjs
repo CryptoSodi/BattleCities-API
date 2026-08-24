@@ -210,6 +210,17 @@ test('Discord follow reward migration makes the five Fuel grant idempotent per p
   assert.match(sql, /fuel_amount INTEGER NOT NULL CHECK \(fuel_amount = 5\)/);
 });
 
+test('initial Fuel grant adds five to existing players and defaults new accounts to five', async () => {
+  const sql = await fs.readFile(
+    path.join(packageRoot, 'migrations/026_initial_fuel_grant.sql'),
+    'utf8',
+  );
+  assert.match(sql, /ALTER COLUMN fuel_balance SET DEFAULT 5/);
+  assert.match(sql, /fuel_balance = battlecity_economy_accounts\.fuel_balance \+ 5/);
+  assert.match(sql, /'initial-five-fuel-grant-v1'/);
+  assert.match(sql, /ON CONFLICT \(id\) DO NOTHING/);
+});
+
 test('live users setting migration defaults the public counter to disabled', async () => {
   const sql = await fs.readFile(
     path.join(packageRoot, 'migrations/021_live_users_setting.sql'),

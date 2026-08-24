@@ -7,6 +7,7 @@ const ledgerStore = require('./ledgerStore');
 const TABLE_NAME = 'battlecity_economy_accounts';
 const SHOP_STARTING_TOKEN_BALANCE = 1000;
 const SHOP_STARTING_SOL_BALANCE = 1.25;
+const SHOP_STARTING_FUEL_BALANCE = 5;
 const SHOP_CATALOG = {
   'fuel-one': { price: 10, solPrice: 0.01, fuel: 1 },
   'fuel-five': { price: 45, solPrice: 0.04, fuel: 5 },
@@ -131,7 +132,7 @@ async function ensureAccountForPlayer(player) {
     walletAddress: player.walletAddress || null,
     tokenBalance: SHOP_STARTING_TOKEN_BALANCE,
     solBalance: SHOP_STARTING_SOL_BALANCE,
-    fuelBalance: 0,
+    fuelBalance: SHOP_STARTING_FUEL_BALANCE,
     inventory: {},
     loadout: {},
     createdAt: now,

@@ -227,7 +227,7 @@ async function distributePrizes(adminPlayerId, tournamentId, allocations) {
           INSERT INTO battlecity_economy_accounts
             (player_id, provider, wallet_address, token_balance, sol_balance,
              fuel_balance, inventory_json, loadout_json, created_at, updated_at)
-          SELECT id, provider, wallet_address, 1000, 1.25, 0, '{}'::JSONB,
+          SELECT id, provider, wallet_address, 1000, 1.25, 5, '{}'::JSONB,
             '{}'::JSONB, $2, $2
           FROM battlecity_players WHERE id = $1
           ON CONFLICT (player_id) DO NOTHING

@@ -21,6 +21,10 @@ test('powerup consumption is authoritative and idempotent', async () => {
     displayName: 'Powerup Test',
     walletAddress: null,
   };
+  assert.equal(
+    (await economy.ensureAccountForPlayer(player)).fuelBalance,
+    5,
+  );
   await economy.purchaseItemForPlayer(player, 'shield', 'token');
 
   const first = await economy.consumePowerupForPlayer(

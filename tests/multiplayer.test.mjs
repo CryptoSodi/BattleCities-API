@@ -78,12 +78,12 @@ test('direct matchmaking charges fuel, fills two slots, and refunds waiting exit
   const reconnected = await context.multiplayer.reconnect(one, first.match.id);
   assert.equal(reconnected.reconnected, true);
   assert.equal(reconnected.playerSlot, 0);
-  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 2);
+  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 7);
 
   const exited = await context.multiplayer.exitMatch(three, third.match.id);
   assert.equal(exited.ok, true);
   assert.equal(exited.refundedFuel, 1);
-  assert.equal((await context.economy.readAccount(three.id)).fuelBalance, 3);
+  assert.equal((await context.economy.readAccount(three.id)).fuelBalance, 8);
 });
 
 test('fresh direct matchmaking skips stale assignments and pairs active players', async () => {
@@ -266,12 +266,12 @@ test('event entry charges once, never refunds, and leaderboard keeps best tied s
   const exited = await context.multiplayer.exitMatch(one, first.match.id);
   assert.equal(exited.ok, true);
   assert.equal(exited.refundedFuel, 0);
-  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 2);
+  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 7);
 
   const restarted = await context.multiplayer.startEventMatch(one, event, 1);
   const joined = await context.multiplayer.startEventMatch(two, event, 1);
   assert.equal(joined.match.id, restarted.match.id);
-  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 2);
+  assert.equal((await context.economy.readAccount(one.id)).fuelBalance, 7);
 
   await context.multiplayer.completeAuthoritativeMatch(restarted.match.id, [
     { playerSlot: 0, score: 500 },
