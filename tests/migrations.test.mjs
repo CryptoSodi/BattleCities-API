@@ -216,8 +216,10 @@ test('initial Fuel grant adds five to existing players and defaults new accounts
     'utf8',
   );
   assert.match(sql, /ALTER COLUMN fuel_balance SET DEFAULT 5/);
+  assert.match(sql, /WHERE p\.provider IN \('wallet', 'google'\)/);
   assert.match(sql, /fuel_balance = battlecity_economy_accounts\.fuel_balance \+ 5/);
   assert.match(sql, /'initial-five-fuel-grant-v1'/);
+  assert.match(sql, /FROM battlecity_economy_accounts a/);
   assert.match(sql, /ON CONFLICT \(id\) DO NOTHING/);
 });
 
