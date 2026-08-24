@@ -45,10 +45,17 @@ async function sendNotification(request: Request, isTest: boolean): Promise<Resp
       return createJsonResponse(request, { ok: false, error: 'Firebase messaging is not configured' }, 503);
     }
 
-    const title = isTest ? 'Battle Cities test' : normalizeMessage(body?.title, 'Title', 80);
-    const message = isTest
-      ? 'Your Android notification connection is ready.'
-      : normalizeMessage(body?.message, 'Message', 240);
+    const notification = isTest
+      ? {
+        title: 'Battle Cities test',
+        body: 'Your Android notification connection is ready.',
+        route: 'home',
+        type: 'test',
+        imageUrl: '',
+        externalUrl: '',
+        actionLabel: 'Open',
+      }
+      : normalizeNotification(body);
     const devices = await pushDevices.listGrantedDevices(audience === 'player' ? playerId : undefined);
     if (devices.length === 0) {
       return createJsonResponse(
@@ -58,7 +65,7 @@ async function sendNotification(request: Request, isTest: boolean): Promise<Resp
       );
     }
 
-    const delivery = await sendInBatches(devices, title, message);
+    const delivery = await sendInBatches(devices, notification);
     const sent = delivery.filter((result) => result.status === 'fulfilled').length;
     const failed = delivery.length - sent;
     return createJsonResponse(request, { ok: sent > 0, sent, failed, devices: devices.length });
@@ -76,13 +83,62 @@ function normalizeMessage(value: unknown, label: string, maximumLength: number):
   return normalized;
 }
 
-async function sendInBatches(devices: any[], title: string, body: string): Promise<PromiseSettledResult<unknown>[]> {
+function normalizeNotification(body: any) {
+  const route = normalizeRoute(body?.route);
+  const externalUrl = route === 'external' ? normalizeHttpsUrl(body?.externalUrl, 'External link', true) : '';
+  return {
+    title: normalizeMessage(body?.title, 'Title', 80),
+    body: normalizeMessage(body?.message, 'Message', 240),
+    route,
+    type: normalizeType(body?.type),
+    imageUrl: normalizeHttpsUrl(body?.imageUrl, 'Image URL', false),
+    externalUrl,
+    actionLabel: normalizeOptionalText(body?.actionLabel, 'Action label', 32),
+  };
+}
+
+function normalizeRoute(value: unknown): string {
+  const route = typeof value === 'string' ? value.trim() : 'home';
+  const allowed = new Set(['home', 'play', 'shop', 'rewards', 'social', 'external', 'share']);
+  if (!allowed.has(route)) throw new Error('Choose a valid notification destination');
+  return route;
+}
+
+function normalizeType(value: unknown): string {
+  const type = typeof value === 'string' ? value.trim() : 'announcement';
+  const allowed = new Set(['announcement', 'reward', 'event', 'social', 'share']);
+  if (!allowed.has(type)) throw new Error('Choose a valid notification type');
+  return type;
+}
+
+function normalizeOptionalText(value: unknown, label: string, maximumLength: number): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized.length > maximumLength) throw new Error(`${label} must be ${maximumLength} characters or fewer`);
+  return normalized;
+}
+
+function normalizeHttpsUrl(value: unknown, label: string, required: boolean): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (normalized === '') {
+    if (required) throw new Error(`${label} is required`);
+    return '';
+  }
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== 'https:' || url.hostname === '') throw new Error('invalid');
+    return url.toString();
+  } catch {
+    throw new Error(`${label} must be a valid https URL`);
+  }
+}
+
+async function sendInBatches(devices: any[], notification: any): Promise<PromiseSettledResult<unknown>[]> {
   const results: PromiseSettledResult<unknown>[] = [];
   const batchSize = 25;
   for (let index = 0; index < devices.length; index += batchSize) {
     const batch = devices.slice(index, index + batchSize);
     results.push(...await Promise.allSettled(
-      batch.map((device) => firebaseMessaging.sendToToken(device.token, { title, body, route: '/' })),
+      batch.map((device) => firebaseMessaging.sendToToken(device.token, notification)),
     ));
   }
   return results;

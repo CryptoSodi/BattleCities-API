@@ -22,6 +22,10 @@ async function sendToToken(token, payload) {
           title: normalizeText(payload.title, 'Battle Cities'),
           body: normalizeText(payload.body, 'You have a new update.'),
           route: normalizeText(payload.route, '/'),
+          type: normalizeText(payload.type, 'announcement'),
+          imageUrl: normalizeText(payload.imageUrl, ''),
+          externalUrl: normalizeText(payload.externalUrl, ''),
+          actionLabel: normalizeText(payload.actionLabel, ''),
         },
         android: {
           priority: 'high',
