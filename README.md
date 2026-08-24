@@ -75,14 +75,15 @@ The frontend Cloudflare Pages project only needs
 
 Android devices register their FCM token through the authenticated API. To let
 the API send notifications, add the complete Firebase Admin service-account
-JSON as an encrypted server-only environment variable:
+JSON as a base64-encoded, server-only environment variable:
 
 ```env
-FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+FIREBASE_SERVICE_ACCOUNT_BASE64=<base64 of the complete service-account JSON>
 ```
 
 Never place this value in the frontend, Android source tree, or a committed
-`.env` file. The API uses the Firebase HTTP v1 endpoint through
+`.env` file. `FIREBASE_SERVICE_ACCOUNT_JSON` remains available for local
+development only. The API uses the Firebase HTTP v1 endpoint through
 `google-auth-library`.
 
 The combined multiplayer values are:

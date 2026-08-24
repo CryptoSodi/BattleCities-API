@@ -36,8 +36,7 @@ async function sendToToken(token, payload) {
 }
 
 function isConfigured() {
-  return typeof process.env.FIREBASE_SERVICE_ACCOUNT_JSON === 'string' &&
-    process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim() !== '';
+  return getServiceAccountValue() !== '';
 }
 
 function getServiceAccount() {
@@ -49,7 +48,7 @@ function getServiceAccount() {
   }
 
   try {
-    const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    const parsed = JSON.parse(getServiceAccountValue());
     if (
       typeof parsed?.project_id !== 'string' ||
       typeof parsed?.client_email !== 'string' ||
@@ -64,6 +63,14 @@ function getServiceAccount() {
       `Firebase service account is invalid: ${error instanceof Error ? error.message : 'unknown error'}`,
     );
   }
+}
+
+function getServiceAccountValue() {
+  const encoded = String(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || '').trim();
+  if (encoded !== '') {
+    return Buffer.from(encoded, 'base64').toString('utf8');
+  }
+  return String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
 }
 
 async function getAuthClient(credentials) {
