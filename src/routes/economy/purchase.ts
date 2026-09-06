@@ -30,6 +30,9 @@ export async function POST(request: Request): Promise<Response> {
   if (player === null) {
     return json(request, { ok: false, statusText: 'PLAYER NOT FOUND' }, 404);
   }
+  if (player.provider !== 'google') {
+    return json(request, { ok: false, statusText: 'USE WALLET PAYMENT' }, 403);
+  }
 
   let body: any;
   try {

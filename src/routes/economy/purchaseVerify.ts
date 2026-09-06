@@ -17,6 +17,9 @@ export async function POST(request: Request): Promise<Response> {
   if (player === null) {
     return json(request, { ok: false, statusText: 'NOT LOGGED IN' }, 401);
   }
+  if (player.provider !== 'wallet') {
+    return json(request, { ok: false, statusText: 'WALLET LOGIN REQUIRED' }, 403);
+  }
   if (!rateLimiter.allow('shop-purchase-verify', player.id)) {
     return json(request, { ok: false, statusText: 'TOO MANY REQUESTS' }, 429);
   }
