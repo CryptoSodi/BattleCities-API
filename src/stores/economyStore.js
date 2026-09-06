@@ -205,6 +205,49 @@ async function purchaseItemForPlayer(player, itemId, currency) {
   };
 }
 
+function getShopCatalogItem(itemId) {
+  const item = SHOP_CATALOG[itemId];
+  return item === undefined ? null : { ...item };
+}
+
+async function grantOnChainPurchaseForPlayer(
+  player,
+  itemId,
+  paymentCurrency,
+  signature,
+  paymentWalletAddress,
+) {
+  if (!isValidPlayer(player)) {
+    throw new Error('Invalid player');
+  }
+
+  const item = SHOP_CATALOG[itemId];
+  if (item === undefined) {
+    throw new Error('ITEM NOT FOUND');
+  }
+
+  const account = await ensureAccountForPlayer(player);
+  if (typeof item.fuel === 'number' && item.fuel > 0) {
+    account.fuelBalance += item.fuel;
+  }
+  if (item.inventory !== undefined) {
+    Object.keys(item.inventory).forEach((key) => {
+      account.inventory[key] = (account.inventory[key] || 0) + item.inventory[key];
+    });
+  }
+
+  account.updatedAt = new Date().toISOString();
+  await writeAccount(account);
+  await appendPurchaseLedgerEntries(
+    { ...account, walletAddress: paymentWalletAddress },
+    item,
+    itemId,
+    paymentCurrency,
+    signature,
+  );
+  return toPublicAccount(account);
+}
+
 async function consumePowerupForPlayer(
   player,
   itemId,
@@ -802,6 +845,8 @@ module.exports = {
   debitFuel,
   debitTokens,
   ensureAccountForPlayer,
+  getShopCatalogItem,
+  grantOnChainPurchaseForPlayer,
   purchaseItemForPlayer,
   readAccount,
   upsertAccountForPlayer,

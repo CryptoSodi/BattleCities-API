@@ -286,6 +286,27 @@ stored before broadcast, and retries reuse the stored transaction until it expir
 preventing duplicate delivery. Keep the distribution keypair outside the repository
 with mode `600`; the API never needs the treasury or mint-authority private key.
 
+### Mainnet game shop payments
+
+The shop creates wallet-signed mainnet transactions through
+`POST /api/economy/purchase/quote`, then verifies the confirmed transaction and
+grants the item through `POST /api/economy/purchase/verify`. SOL is paid to the
+treasury's native balance. BATC is paid to the treasury-owned Token-2022
+associated token account for the configured mint.
+
+```text
+BATTLECITY_SHOP_TREASURY_ADDRESS=6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F
+BATTLECITY_SHOP_TOKEN_MINT=Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz
+BATTLECITY_SHOP_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+BATTLECITY_SHOP_QUOTE_SECRET=<32+ random bytes; server only>
+```
+
+The shop falls back to the corresponding presale treasury, mint, RPC, and
+quote-secret variables when dedicated shop values are absent. No treasury,
+mint-authority, or distribution-wallet private key is used for shop payments.
+Apply migrations through `028_shop_onchain_payments.sql` before enabling these
+routes.
+
 Local storage mode writes archive metadata and JSONL frame batches under
 `server-data/match-archives`. Override that path with
 `BATTLECITY_MATCH_ARCHIVE_DIR` for isolated local tests.

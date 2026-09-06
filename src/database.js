@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '027_allow_unlinked_push_devices';
+const REQUIRED_MIGRATION = '028_shop_onchain_payments';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

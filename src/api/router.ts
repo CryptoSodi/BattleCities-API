@@ -19,7 +19,8 @@ import * as cherryEmbedToken from '../routes/cherryEmbedToken';
 import * as economyAccount from '../routes/economy/account';
 import * as economyConsumePowerup from '../routes/economy/consume-powerup';
 import * as economyLedger from '../routes/economy/ledger';
-import * as economyPurchase from '../routes/economy/purchase';
+import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
+import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
 import * as events from '../routes/events';
 import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
@@ -100,7 +101,8 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'economy/account': economyAccount,
   'economy/powerups/consume': economyConsumePowerup,
   'economy/ledger': economyLedger,
-  'economy/purchase': economyPurchase,
+  'economy/purchase/quote': economyPurchaseQuote,
+  'economy/purchase/verify': economyPurchaseVerify,
   events,
   'events/detail': eventDetail,
   'events/leaderboard': eventLeaderboard,
