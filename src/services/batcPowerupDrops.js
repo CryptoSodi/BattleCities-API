@@ -15,14 +15,30 @@ const storageConfig = require('../config/storageConfig');
 const dropStore = require('../stores/batcPowerupDropStore');
 
 const MAINNET_BATC_MINT = 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz';
+const BATC_TREASURY_ADDRESS = '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F';
+const REGULAR_DROP_TYPES = Object.freeze([
+  'defence',
+  'freeze',
+  'life',
+  'shield',
+  'speed',
+  'upgrade',
+  'zoomout',
+  'wipeout',
+]);
 const CONFIRMED_STATUSES = new Set(['confirmed', 'finalized']);
 let cachedKeypair = null;
 let cachedKeypairPath = null;
 
 async function roll(player, requestId, levelNumber) {
   const config = readConfig();
-  if (!config.enabled || !storageConfig.hasDatabaseConfig()) return null;
-  if (player?.provider !== 'wallet' || !player.walletAddress) return null;
+  const regularType = randomRegularDropType();
+  if (!config.enabled || !storageConfig.hasDatabaseConfig()) {
+    return { dropType: regularType, reward: null };
+  }
+  if (player?.provider !== 'wallet' || !player.walletAddress) {
+    return { dropType: regularType, reward: null };
+  }
   assertConfigured(config);
   if (!isSafeRequestId(requestId)) throw new Error('Invalid drop request id.');
 
@@ -31,7 +47,7 @@ async function roll(player, requestId, levelNumber) {
   if (rollValue < config.chance200Bps) amount = 200;
   else if (rollValue < config.chance200Bps + config.chance100Bps) amount = 100;
 
-  return dropStore.issueRoll({
+  const reward = await dropStore.issueRoll({
     id: `drop-${crypto.randomUUID()}`,
     requestId,
     playerId: player.id,
@@ -43,6 +59,14 @@ async function roll(player, requestId, levelNumber) {
     maxPlayerBatcPerDay: config.maxPlayerBatcPerDay,
     maxGlobalBatcPerDay: config.maxGlobalBatcPerDay,
   });
+  return {
+    dropType: reward.amount === 200
+      ? 'batc200'
+      : reward.amount === 100
+        ? 'batc100'
+        : regularType,
+    reward: reward.amount > 0 ? reward : null,
+  };
 }
 
 async function claim(player, claimId) {
@@ -102,11 +126,11 @@ async function resolveExistingDelivery(connection, reward) {
 }
 
 async function createPreparedDelivery(connection, reward, config) {
-  const distributor = await loadDistributionKeypair(config);
+  const authority = await loadRewardAuthorityKeypair(config);
   const owner = new PublicKey(reward.walletAddress);
   const source = getAssociatedTokenAddressSync(
     config.tokenMint,
-    distributor.publicKey,
+    config.sourceAddress,
     false,
     TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -125,21 +149,29 @@ async function createPreparedDelivery(connection, reward, config) {
     TOKEN_2022_PROGRAM_ID,
   );
   const amountAtomic = BigInt(reward.amount) * 1000000n;
-  if (!sourceAccount.owner.equals(distributor.publicKey) ||
+  if (!sourceAccount.owner.equals(config.sourceAddress) ||
       !sourceAccount.mint.equals(config.tokenMint)) {
-    throw new Error('BATC reward source account does not match the configured wallet and mint.');
+    throw new Error('BATC reward source account does not match the treasury and mint.');
   }
   if (sourceAccount.amount < amountAtomic) {
-    throw new Error('BATC reward wallet has insufficient tokens.');
+    throw new Error('BATC treasury has insufficient tokens.');
+  }
+  const authorityOwnsSource = sourceAccount.owner.equals(authority.publicKey);
+  const authorityIsDelegate = sourceAccount.delegate?.equals(authority.publicKey) === true;
+  if (!authorityOwnsSource && !authorityIsDelegate) {
+    throw new Error('BATC reward authority is not approved as the treasury token-account delegate.');
+  }
+  if (authorityIsDelegate && sourceAccount.delegatedAmount < amountAtomic) {
+    throw new Error('BATC reward delegate allowance is insufficient.');
   }
 
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({
-    feePayer: distributor.publicKey,
+    feePayer: authority.publicKey,
     recentBlockhash: blockhash,
   });
   transaction.add(createAssociatedTokenAccountIdempotentInstruction(
-    distributor.publicKey,
+    authority.publicKey,
     destination,
     owner,
     config.tokenMint,
@@ -150,13 +182,13 @@ async function createPreparedDelivery(connection, reward, config) {
     source,
     config.tokenMint,
     destination,
-    distributor.publicKey,
+    authority.publicKey,
     amountAtomic,
     6,
     [],
     TOKEN_2022_PROGRAM_ID,
   ));
-  transaction.sign(distributor);
+  transaction.sign(authority);
   return {
     signature: bs58.encode(transaction.signature),
     rawTransaction: transaction.serialize().toString('base64'),
@@ -201,39 +233,43 @@ async function broadcastPrepared(connection, reward) {
   }
 }
 
-async function loadDistributionKeypair(config) {
-  if (cachedKeypair && cachedKeypairPath === config.distributionKeypairPath) {
+async function loadRewardAuthorityKeypair(config) {
+  if (cachedKeypair && cachedKeypairPath === config.authorityKeypairPath) {
     return cachedKeypair;
   }
-  const stat = await fs.stat(config.distributionKeypairPath);
+  const stat = await fs.stat(config.authorityKeypairPath);
   if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) {
     throw new Error('BATC reward keypair permissions must be 600 or stricter.');
   }
-  const bytes = JSON.parse(await fs.readFile(config.distributionKeypairPath, 'utf8'));
+  const bytes = JSON.parse(await fs.readFile(config.authorityKeypairPath, 'utf8'));
   if (!Array.isArray(bytes) || bytes.length !== 64) {
     throw new Error('BATC reward keypair file is invalid.');
   }
   const keypair = Keypair.fromSecretKey(Uint8Array.from(bytes));
-  if (!keypair.publicKey.equals(config.distributionAddress)) {
-    throw new Error('BATC reward keypair does not match its configured address.');
+  if (!keypair.publicKey.equals(config.authorityAddress)) {
+    throw new Error('BATC reward authority keypair does not match its configured address.');
   }
   cachedKeypair = keypair;
-  cachedKeypairPath = config.distributionKeypairPath;
+  cachedKeypairPath = config.authorityKeypairPath;
   return keypair;
 }
 
 function readConfig() {
   const mintText = String(process.env.BATTLECITY_DROP_REWARD_TOKEN_MINT || MAINNET_BATC_MINT).trim();
-  const addressText = String(process.env.BATTLECITY_DROP_REWARD_DISTRIBUTION_ADDRESS || '').trim();
+  const sourceText = String(
+    process.env.BATTLECITY_DROP_REWARD_SOURCE_ADDRESS || BATC_TREASURY_ADDRESS,
+  ).trim();
+  const authorityText = String(process.env.BATTLECITY_DROP_REWARD_AUTHORITY_ADDRESS || '').trim();
   return {
     enabled: process.env.BATTLECITY_DROP_REWARDS_ENABLED === '1',
     network: String(process.env.BATTLECITY_DROP_REWARD_NETWORK || 'mainnet-beta').trim(),
     tokenMint: safePublicKey(mintText),
-    distributionAddress: safePublicKey(addressText),
-    distributionKeypairPath: String(process.env.BATTLECITY_DROP_REWARD_KEYPAIR_PATH || '').trim(),
+    sourceAddress: safePublicKey(sourceText),
+    authorityAddress: safePublicKey(authorityText),
+    authorityKeypairPath: String(process.env.BATTLECITY_DROP_REWARD_AUTHORITY_KEYPAIR_PATH || '').trim(),
     rpcUrl: String(process.env.BATTLECITY_DROP_REWARD_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com').trim(),
-    chance100Bps: boundedInteger(process.env.BATTLECITY_DROP_REWARD_100_BPS, 25, 0, 10000),
-    chance200Bps: boundedInteger(process.env.BATTLECITY_DROP_REWARD_200_BPS, 5, 0, 10000),
+    chance100Bps: boundedInteger(process.env.BATTLECITY_DROP_REWARD_100_BPS, 200, 0, 10000),
+    chance200Bps: boundedInteger(process.env.BATTLECITY_DROP_REWARD_200_BPS, 100, 0, 10000),
     claimTtlMinutes: boundedInteger(process.env.BATTLECITY_DROP_REWARD_CLAIM_TTL_MINUTES, 30, 5, 1440),
     maxRollsPerDay: boundedInteger(process.env.BATTLECITY_DROP_REWARD_MAX_ROLLS_PER_DAY, 100, 1, 10000),
     maxPlayerBatcPerDay: boundedInteger(process.env.BATTLECITY_DROP_REWARD_MAX_PLAYER_BATC_PER_DAY, 400, 100, 1000000),
@@ -250,12 +286,19 @@ function assertConfigured(config) {
   if (!config.tokenMint || config.tokenMint.toBase58() !== MAINNET_BATC_MINT) {
     throw new Error('BATC drop mint must be the production Token-2022 mint.');
   }
-  if (!config.distributionAddress || !config.distributionKeypairPath) {
-    throw new Error('BATC reward distribution wallet is not configured.');
+  if (!config.sourceAddress || config.sourceAddress.toBase58() !== BATC_TREASURY_ADDRESS) {
+    throw new Error('BATC reward source must be the production treasury wallet.');
+  }
+  if (!config.authorityAddress || !config.authorityKeypairPath) {
+    throw new Error('BATC reward delegate authority is not configured.');
   }
   if (config.chance100Bps + config.chance200Bps > 10000) {
     throw new Error('BATC drop odds exceed 100%.');
   }
+}
+
+function randomRegularDropType() {
+  return REGULAR_DROP_TYPES[crypto.randomInt(REGULAR_DROP_TYPES.length)];
 }
 
 function safePublicKey(value) {

@@ -14,8 +14,12 @@ test('BATC drops are safely disabled by default and locked to mainnet BATC', () 
     config.tokenMint.toBase58(),
     'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz',
   );
-  assert.equal(config.chance100Bps, 25);
-  assert.equal(config.chance200Bps, 5);
+  assert.equal(config.chance100Bps, 200);
+  assert.equal(config.chance200Bps, 100);
+  assert.equal(
+    config.sourceAddress.toBase58(),
+    '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F',
+  );
 });
 
 test('disabled BATC drops do not require a database or issue a claim', async () => {
@@ -24,7 +28,12 @@ test('disabled BATC drops do not require a database or issue a claim', async () 
     provider: 'wallet',
     walletAddress: '7P5t1uh64Kxh524jz1EMDhQNsnd7DxZju5gfjRtqxYUM',
   }, '0123456789abcdef', 1);
-  assert.equal(result, null);
+  assert.equal(typeof result.dropType, 'string');
+  assert.ok([
+    'defence', 'freeze', 'life', 'shield',
+    'speed', 'upgrade', 'zoomout', 'wipeout',
+  ].includes(result.dropType));
+  assert.equal(result.reward, null);
 });
 
 test('BATC drop migration enforces one request and fixed reward amounts', async () => {

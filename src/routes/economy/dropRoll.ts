@@ -13,8 +13,6 @@ export function OPTIONS(request: Request): Response {
 
 export async function POST(request: Request): Promise<Response> {
   const player = await resolvePlayer(request);
-  if (player === null) return json(request, { eligible: false });
-
   let body: any;
   try {
     body = await request.json();
@@ -23,10 +21,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const reward = await batcDrops.roll(player, body?.requestId, body?.levelNumber);
-    return json(request, reward?.amount > 0
-      ? { eligible: true, claimId: reward.id, amount: reward.amount }
-      : { eligible: false });
+    const result = await batcDrops.roll(player, body?.requestId, body?.levelNumber);
+    return json(request, result?.reward
+      ? {
+          eligible: true,
+          dropType: result.dropType,
+          claimId: result.reward.id,
+          amount: result.reward.amount,
+        }
+      : { eligible: false, dropType: result?.dropType });
   } catch (error: any) {
     const status = error?.code === 'DROP_ROLL_LIMIT' ? 429 : 503;
     return json(request, { eligible: false, error: error?.message || 'Drop roll failed.' }, status);
