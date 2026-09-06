@@ -307,6 +307,35 @@ mint-authority, or distribution-wallet private key is used for shop payments.
 Apply migrations through `028_shop_onchain_payments.sql` before enabling these
 routes.
 
+### Mainnet BATC battlefield drops
+
+Offline single-player asks the API for a server-side rarity roll before each
+eligible enemy drop. Only wallet-authenticated players can receive a BATC drop.
+Picking it up submits its one-time claim, and the API transfers Token-2022 BATC
+from a dedicated, limited reward wallet. Ordinary gameplay powerups remain
+local and continue working when this feature is disabled or unavailable.
+
+```text
+BATTLECITY_DROP_REWARDS_ENABLED=0
+BATTLECITY_DROP_REWARD_NETWORK=mainnet-beta
+BATTLECITY_DROP_REWARD_TOKEN_MINT=Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz
+BATTLECITY_DROP_REWARD_DISTRIBUTION_ADDRESS=<limited BATC reward wallet address>
+BATTLECITY_DROP_REWARD_KEYPAIR_PATH=/etc/battlecities/secrets/batc-drop-rewards.json
+BATTLECITY_DROP_REWARD_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+BATTLECITY_DROP_REWARD_100_BPS=25
+BATTLECITY_DROP_REWARD_200_BPS=5
+BATTLECITY_DROP_REWARD_CLAIM_TTL_MINUTES=30
+BATTLECITY_DROP_REWARD_MAX_ROLLS_PER_DAY=100
+BATTLECITY_DROP_REWARD_MAX_PLAYER_BATC_PER_DAY=400
+BATTLECITY_DROP_REWARD_MAX_GLOBAL_BATC_PER_DAY=10000
+```
+
+The default odds are 0.25% for 100 BATC and 0.05% for 200 BATC. Keep the
+feature disabled until the dedicated mainnet wallet is funded with BATC and
+enough SOL for transfer fees and associated-token-account rent. The keypair
+must stay outside the repository with permissions `600`; never use the treasury
+or mint-authority key. Apply `029_batc_powerup_drops.sql` first.
+
 Local storage mode writes archive metadata and JSONL frame batches under
 `server-data/match-archives`. Override that path with
 `BATTLECITY_MATCH_ARCHIVE_DIR` for isolated local tests.

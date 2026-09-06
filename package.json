@@ -28,6 +28,6 @@
     "setup:check": "node scripts/check-setup.mjs",
     "setup:google": "node scripts/check-google-login.mjs",
     "start": "node dist/api-server/src/index.js",
-    "test:db": "node --test tests/database-config.test.mjs tests/migrations.test.mjs tests/multiplayer.test.mjs tests/match-archives.test.mjs tests/database-integration.test.mjs tests/presale.test.mjs tests/shop-payments.test.mjs tests/x-oauth.test.mjs"
+    "test:db": "node --test tests/database-config.test.mjs tests/migrations.test.mjs tests/multiplayer.test.mjs tests/match-archives.test.mjs tests/database-integration.test.mjs tests/presale.test.mjs tests/shop-payments.test.mjs tests/batc-powerup-drops.test.mjs tests/x-oauth.test.mjs"
   }
 }

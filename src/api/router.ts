@@ -18,6 +18,8 @@ import * as boostStatus from '../routes/boost/status';
 import * as cherryEmbedToken from '../routes/cherryEmbedToken';
 import * as economyAccount from '../routes/economy/account';
 import * as economyConsumePowerup from '../routes/economy/consume-powerup';
+import * as economyDropClaim from '../routes/economy/dropClaim';
+import * as economyDropRoll from '../routes/economy/dropRoll';
 import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
 import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
@@ -100,6 +102,8 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'cherry-embed-token': cherryEmbedToken,
   'economy/account': economyAccount,
   'economy/powerups/consume': economyConsumePowerup,
+  'economy/drops/claim': economyDropClaim,
+  'economy/drops/roll': economyDropRoll,
   'economy/ledger': economyLedger,
   'economy/purchase/quote': economyPurchaseQuote,
   'economy/purchase/verify': economyPurchaseVerify,

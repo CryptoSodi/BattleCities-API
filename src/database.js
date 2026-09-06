@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '028_shop_onchain_payments';
+const REQUIRED_MIGRATION = '029_batc_powerup_drops';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;
