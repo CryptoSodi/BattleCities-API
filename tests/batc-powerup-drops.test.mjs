@@ -16,10 +16,7 @@ test('BATC drops are safely disabled by default and locked to mainnet BATC', () 
   );
   assert.equal(config.chance100Bps, 200);
   assert.equal(config.chance200Bps, 100);
-  assert.equal(
-    config.sourceAddress.toBase58(),
-    '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F',
-  );
+  assert.equal(config.sourceAddress, null);
 });
 
 test('disabled BATC drops do not require a database or issue a claim', async () => {

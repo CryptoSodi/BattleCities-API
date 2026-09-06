@@ -312,15 +312,16 @@ routes.
 Offline single-player asks the API to select every battlefield drop before each
 eligible enemy drop. Only wallet-authenticated players can receive a BATC drop.
 Picking it up submits its one-time claim, and the API transfers Token-2022 BATC
-from the treasury's token account using a capped server-side delegate. If the
-API is unavailable, ordinary powerups safely fall back to the local generator.
+from a limited server-side reward wallet. Fund that wallet from the treasury;
+the API never needs the treasury or mint-authority private key. If the API is
+unavailable, ordinary powerups safely fall back to the local generator.
 
 ```text
 BATTLECITY_DROP_REWARDS_ENABLED=0
 BATTLECITY_DROP_REWARD_NETWORK=mainnet-beta
 BATTLECITY_DROP_REWARD_TOKEN_MINT=Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz
-BATTLECITY_DROP_REWARD_SOURCE_ADDRESS=6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F
-BATTLECITY_DROP_REWARD_AUTHORITY_ADDRESS=<limited delegate signer address>
+BATTLECITY_DROP_REWARD_SOURCE_ADDRESS=<limited server reward wallet address>
+BATTLECITY_DROP_REWARD_AUTHORITY_ADDRESS=<same wallet's signer address>
 BATTLECITY_DROP_REWARD_AUTHORITY_KEYPAIR_PATH=/etc/battlecities/secrets/batc-drop-rewards.json
 BATTLECITY_DROP_REWARD_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 BATTLECITY_DROP_REWARD_100_BPS=200
@@ -332,12 +333,10 @@ BATTLECITY_DROP_REWARD_MAX_GLOBAL_BATC_PER_DAY=10000
 ```
 
 The default odds are 2% for 100 BATC and 1% for 200 BATC. Keep the feature
-disabled until the treasury's Token-2022 associated token account approves the
-server authority as a delegate with a deliberately capped allowance. The
-delegate also needs enough SOL for transfer fees and associated-token-account
-rent. Its keypair must stay outside the repository with permissions `600`;
-never place the treasury or mint-authority key on the server. Apply
-`029_batc_powerup_drops.sql` first.
+disabled until the dedicated reward wallet is funded with BATC and enough SOL
+for transfer fees and associated-token-account rent. Its keypair must stay
+outside the repository with permissions `600`; never place the treasury or
+mint-authority key on the server. Apply `029_batc_powerup_drops.sql` first.
 
 Local storage mode writes archive metadata and JSONL frame batches under
 `server-data/match-archives`. Override that path with

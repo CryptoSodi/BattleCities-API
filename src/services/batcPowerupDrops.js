@@ -15,7 +15,6 @@ const storageConfig = require('../config/storageConfig');
 const dropStore = require('../stores/batcPowerupDropStore');
 
 const MAINNET_BATC_MINT = 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz';
-const BATC_TREASURY_ADDRESS = '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F';
 const REGULAR_DROP_TYPES = Object.freeze([
   'defence',
   'freeze',
@@ -256,9 +255,7 @@ async function loadRewardAuthorityKeypair(config) {
 
 function readConfig() {
   const mintText = String(process.env.BATTLECITY_DROP_REWARD_TOKEN_MINT || MAINNET_BATC_MINT).trim();
-  const sourceText = String(
-    process.env.BATTLECITY_DROP_REWARD_SOURCE_ADDRESS || BATC_TREASURY_ADDRESS,
-  ).trim();
+  const sourceText = String(process.env.BATTLECITY_DROP_REWARD_SOURCE_ADDRESS || '').trim();
   const authorityText = String(process.env.BATTLECITY_DROP_REWARD_AUTHORITY_ADDRESS || '').trim();
   return {
     enabled: process.env.BATTLECITY_DROP_REWARDS_ENABLED === '1',
@@ -286,8 +283,8 @@ function assertConfigured(config) {
   if (!config.tokenMint || config.tokenMint.toBase58() !== MAINNET_BATC_MINT) {
     throw new Error('BATC drop mint must be the production Token-2022 mint.');
   }
-  if (!config.sourceAddress || config.sourceAddress.toBase58() !== BATC_TREASURY_ADDRESS) {
-    throw new Error('BATC reward source must be the production treasury wallet.');
+  if (!config.sourceAddress) {
+    throw new Error('BATC reward source wallet is not configured.');
   }
   if (!config.authorityAddress || !config.authorityKeypairPath) {
     throw new Error('BATC reward delegate authority is not configured.');
