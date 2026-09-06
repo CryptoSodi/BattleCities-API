@@ -5,6 +5,10 @@ const sessionIdentity = require('../services/sessionIdentity');
 const sessionStore = require('../stores/sessionStore');
 
 const ADMIN_EMAILS = new Set(['tassaduq009@gmail.com']);
+const ADMIN_WALLETS = new Set([
+  '9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo',
+  '7P5t1uh64Kxh524jz1EMDhQNsnd7DxZju5gfjRtqxYUM',
+]);
 
 export type AdminAuthorization =
   | {
@@ -35,8 +39,13 @@ export async function authorizeAdminRequest(
   }
 
   const email = normalizeEmail(session.googleEmail);
-  if (session.provider !== 'google' || !ADMIN_EMAILS.has(email)) {
-    return { ok: false, status: 403, email: email || null };
+  const walletAddress = normalizeWalletAddress(session.walletAddress);
+  const hasAdminEmail =
+    session.provider === 'google' && ADMIN_EMAILS.has(email);
+  const hasAdminWallet =
+    session.provider === 'wallet' && ADMIN_WALLETS.has(walletAddress);
+  if (!hasAdminEmail && !hasAdminWallet) {
+    return { ok: false, status: 403, email: email || walletAddress || null };
   }
 
   const player = await playerStore.readPlayer(session.playerId);
@@ -44,9 +53,13 @@ export async function authorizeAdminRequest(
     return { ok: false, status: 401, email: null };
   }
 
-  return { ok: true, session, player, email };
+  return { ok: true, session, player, email: email || walletAddress };
 }
 
 function normalizeEmail(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function normalizeWalletAddress(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
