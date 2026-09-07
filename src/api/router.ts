@@ -23,6 +23,7 @@ import * as economyDropRoll from '../routes/economy/dropRoll';
 import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
 import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
+import * as economyWalletBalance from '../routes/economy/walletBalance';
 import * as events from '../routes/events';
 import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
@@ -107,6 +108,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'economy/ledger': economyLedger,
   'economy/purchase/quote': economyPurchaseQuote,
   'economy/purchase/verify': economyPurchaseVerify,
+  'economy/wallet-balance': economyWalletBalance,
   events,
   'events/detail': eventDetail,
   'events/leaderboard': eventLeaderboard,

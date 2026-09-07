@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const {
   ComputeBudgetProgram,
   Connection,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   Transaction,
@@ -187,6 +188,38 @@ async function createQuote(player, input) {
   };
 }
 
+// Read-only mainnet balances for an authenticated wallet. This deliberately
+// does not use the economy store: SOL and BATC are owned by the wallet, not a
+// virtual game account.
+async function getWalletBalances(walletAddress) {
+  let wallet;
+  try {
+    wallet = new PublicKey(String(walletAddress || '').trim());
+  } catch {
+    throw new Error('Invalid wallet address.');
+  }
+
+  const tokenMint = new PublicKey(TOKEN_MINT);
+  const rpcUrl = String(
+    process.env.BATTLECITY_SHOP_SOLANA_RPC_URL || PUBLIC_RPC_URL,
+  ).trim();
+  const connection = new Connection(rpcUrl, 'confirmed');
+  const [lamports, tokenAccounts] = await Promise.all([
+    connection.getBalance(wallet, 'confirmed'),
+    connection.getParsedTokenAccountsByOwner(wallet, { mint: tokenMint }),
+  ]);
+  const tokenAmount = tokenAccounts.value.reduce((total, account) => {
+    const amount = account.account.data.parsed?.info?.tokenAmount?.amount;
+    return total + (typeof amount === 'string' ? Number(amount) : 0);
+  }, 0);
+
+  return {
+    walletAddress: wallet.toBase58(),
+    solBalance: lamports / LAMPORTS_PER_SOL,
+    tokenBalance: tokenAmount / 10 ** TOKEN_DECIMALS,
+  };
+}
+
 async function verifyPurchase(player, input) {
   const config = getConfig();
   assertConfigured(config);
@@ -348,6 +381,7 @@ module.exports = {
   TOKEN_MINT,
   TREASURY,
   createQuote,
+  getWalletBalances,
   verifyPayment,
   verifyPurchase,
 };
