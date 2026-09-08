@@ -28,6 +28,7 @@ import * as events from '../routes/events';
 import * as eventDetail from '../routes/events/detail';
 import * as eventLeaderboard from '../routes/events/leaderboard';
 import * as health from '../routes/health';
+import * as leaderboardRewards from '../routes/leaderboardRewards';
 import * as discordInteractions from '../routes/integrations/discord/interactions';
 import * as discordVerifiedUsers from '../routes/integrations/discord/verifiedUsers';
 import * as discordVerification from '../routes/integrations/discord/verification';
@@ -124,6 +125,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'integrations/x/verify-follow': xVerifyFollow,
   'integrations/x/verify-repost': xVerifyRepost,
   'integrations/x/verify-comment': xVerifyComment,
+  'leaderboard/rewards': leaderboardRewards,
   'matches/submit': matchSubmit,
   'multiplayer/direct/start': multiplayerDirectStart,
   'notifications/devices': notificationDevices,

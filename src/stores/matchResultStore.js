@@ -186,6 +186,57 @@ async function getLeaderboard(seasonId, limit = 20) {
     .map((row, index) => ({ rank: index + 1, ...row }));
 }
 
+// The rewards board is a separate, bounded scoring window. It uses the same
+// server-derived points as seasons and never admits guest or rejected runs.
+async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10) {
+  const safeLimit = Math.max(
+    1,
+    Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 10),
+  );
+  const scopeSeasonId =
+    typeof seasonId === 'string' && seasonId !== '' ? seasonId : null;
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
+    return [];
+  }
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const params = [start.toISOString(), end.toISOString()];
+    let where = `validation_status <> 'rejected' AND provider <> 'guest'
+      AND created_at >= $1 AND created_at < $2`;
+    if (scopeSeasonId !== null) {
+      params.push(scopeSeasonId);
+      where += ` AND season_id = $${params.length}`;
+    }
+    params.push(safeLimit);
+    const result = await getPgPool().query(
+      `SELECT player_id, MAX(wallet_address) AS wallet_address,
+        MAX(display_name) AS display_name, SUM(game_points)::bigint AS total_points,
+        COUNT(*)::int AS matches
+       FROM ${TABLE_NAME} WHERE ${where}
+       GROUP BY player_id ORDER BY total_points DESC, player_id ASC
+       LIMIT $${params.length}`,
+      params,
+    );
+    return result.rows.map((row, index) => ({
+      rank: index + 1,
+      playerId: row.player_id,
+      walletAddress: row.wallet_address,
+      displayName: row.display_name,
+      totalPoints: Number(row.total_points),
+      matches: Number(row.matches),
+    }));
+  }
+
+  const totals = await aggregateFileResultsInWindow(scopeSeasonId, start, end);
+  return totals
+    .sort((a, b) => b.totalPoints - a.totalPoints || (a.playerId < b.playerId ? -1 : 1))
+    .slice(0, safeLimit)
+    .map((row, index) => ({ rank: index + 1, ...row }));
+}
+
 // Rank + totals of a single player in a scope; null when they have no
 // results there. Rank counts players with strictly more points, mirroring
 // the leaderboard's ordering.
@@ -461,6 +512,26 @@ async function aggregateFileResults(scopeSeasonId) {
   return Array.from(byPlayer.values());
 }
 
+async function aggregateFileResultsInWindow(scopeSeasonId, start, end) {
+  const byPlayer = new Map();
+  let files;
+  try { files = await fs.readdir(getDataDir()); } catch { return []; }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    let result;
+    try { result = JSON.parse(await fs.readFile(path.join(getDataDir(), file), 'utf8')); } catch { continue; }
+    const createdAt = Date.parse(result?.createdAt);
+    if (!Number.isFinite(createdAt) || createdAt < start.getTime() || createdAt >= end.getTime()) continue;
+    if (result.validationStatus === 'rejected' || result.provider === 'guest') continue;
+    if (scopeSeasonId !== null && result.seasonId !== scopeSeasonId) continue;
+    const row = byPlayer.get(result.playerId) || { playerId: result.playerId, walletAddress: result.walletAddress || null, displayName: result.displayName || 'Player', totalPoints: 0, matches: 0 };
+    row.totalPoints += Number(result.gamePoints) || 0;
+    row.matches += 1;
+    byPlayer.set(result.playerId, row);
+  }
+  return Array.from(byPlayer.values());
+}
+
 function toPublicResult(result) {
   return {
     id: result.id,
@@ -508,6 +579,7 @@ function isValidPlayer(value) {
 module.exports = {
   computeGamePoints,
   getLeaderboard,
+  getLeaderboardInWindow,
   getPlayerRank,
   getPublicPlayerReplay,
   getPlayerResultCount,
