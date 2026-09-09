@@ -12,7 +12,7 @@ const REWARD_TIERS = Object.freeze([
 // The public board uses a server-side 30-minute scoring window. Distribution
 // is deliberately gated behind the payout worker configuration: the browser
 // can never decide recipients or sign a token transfer.
-async function getLiveBoard() {
+async function getLiveBoard(playerId = null) {
   const now = Date.now();
   const intervalMs = REWARD_INTERVAL_MINUTES * 60 * 1000;
   const periodStart = Math.floor(now / intervalMs) * intervalMs;
@@ -23,6 +23,7 @@ async function getLiveBoard() {
     new Date(periodStart).toISOString(),
     new Date(periodEnd).toISOString(),
     10,
+    playerId,
   );
 
   return {
@@ -30,7 +31,8 @@ async function getLiveBoard() {
     intervalStartedAt: new Date(periodStart).toISOString(),
     nextRewardAt: new Date(periodEnd).toISOString(),
     rewardIntervalMinutes: REWARD_INTERVAL_MINUTES,
-    rows,
+    rows: rows.filter((row) => row.rank <= 10),
+    currentPlayer: rows.find((row) => row.playerId === playerId) || null,
     tiers: REWARD_TIERS,
   };
 }

@@ -5,6 +5,7 @@ import { createJsonResponse, createOptionsResponse } from './_helpers';
 const playerStore = require('../stores/playerStore');
 const sessionIdentity = require('../services/sessionIdentity');
 const sessionStore = require('../stores/sessionStore');
+const matchResultStore = require('../stores/matchResultStore');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -29,9 +30,19 @@ export async function GET(request: Request): Promise<Response> {
     return json(request, { authenticated: false });
   }
 
+  const rank = await matchResultStore.getPlayerRank(player.id, null);
+  const pointsPerLevel = Math.max(1, Math.floor(Number(process.env.BATTLECITY_POINTS_PER_LEVEL) || 1000));
+  const totalPoints = Math.max(0, rank?.totalPoints || 0);
   return json(request, {
     authenticated: true,
-    player: playerStore.toPublicPlayer(player),
+    player: {
+      ...playerStore.toPublicPlayer(player),
+      progression: {
+        level: 1 + Math.floor(totalPoints / pointsPerLevel),
+        points: totalPoints % pointsPerLevel,
+        pointsRequired: pointsPerLevel,
+      },
+    },
   });
 }
 

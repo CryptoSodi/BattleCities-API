@@ -188,7 +188,7 @@ async function getLeaderboard(seasonId, limit = 20) {
 
 // The rewards board is a separate, bounded scoring window. It uses the same
 // server-derived points as seasons and never admits guest or rejected runs.
-async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10) {
+async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, playerId = null) {
   const safeLimit = Math.max(
     1,
     Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 10),
@@ -211,17 +211,22 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10) {
       where += ` AND season_id = $${params.length}`;
     }
     params.push(safeLimit);
+    const limitParam = params.length;
+    params.push(isValidPlayerId(playerId) ? playerId : null);
     const result = await getPgPool().query(
-      `SELECT player_id, MAX(wallet_address) AS wallet_address,
+      `WITH totals AS (SELECT player_id, MAX(wallet_address) AS wallet_address,
         MAX(display_name) AS display_name, SUM(game_points)::bigint AS total_points,
         COUNT(*)::int AS matches
        FROM ${TABLE_NAME} WHERE ${where}
-       GROUP BY player_id ORDER BY total_points DESC, player_id ASC
-       LIMIT $${params.length}`,
+       GROUP BY player_id), ranked AS (
+         SELECT *, ROW_NUMBER() OVER (ORDER BY total_points DESC, player_id ASC) AS rank
+         FROM totals
+       ) SELECT * FROM ranked WHERE rank <= $${limitParam} OR player_id = $${params.length}
+       ORDER BY rank`,
       params,
     );
     return result.rows.map((row, index) => ({
-      rank: index + 1,
+      rank: Number(row.rank),
       playerId: row.player_id,
       walletAddress: row.wallet_address,
       displayName: row.display_name,
@@ -233,8 +238,8 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10) {
   const totals = await aggregateFileResultsInWindow(scopeSeasonId, start, end);
   return totals
     .sort((a, b) => b.totalPoints - a.totalPoints || (a.playerId < b.playerId ? -1 : 1))
-    .slice(0, safeLimit)
-    .map((row, index) => ({ rank: index + 1, ...row }));
+    .map((row, index) => ({ rank: index + 1, ...row }))
+    .filter((row) => row.rank <= safeLimit || row.playerId === playerId);
 }
 
 // Rank + totals of a single player in a scope; null when they have no
