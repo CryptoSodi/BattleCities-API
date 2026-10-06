@@ -1,97 +1,16 @@
-import { createRequire } from 'module';
-
+import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { loadLocalEnv } = require('../src/config/loadLocalEnv');
-
-loadLocalEnv();
-
-const googleAuth = require('../src/services/googleAuth');
-const storageConfig = require('../src/config/storageConfig');
-const presaleService = require('../src/services/presaleService');
-const xOAuth = require('../src/services/xOAuth');
-
-const databaseUrl = storageConfig.getDatabaseUrl();
-const database = describeDatabase(databaseUrl);
+require('../src/config/loadLocalEnv').loadLocalEnv();
+const storage = require('../src/config/storageConfig');
+const configured = (name) => String(process.env[name] || '').trim() !== '';
 const status = {
-  postgres: {
-    configured: databaseUrl !== '',
-    host: database.host,
-    database: database.name,
-  },
-  google: {
-    configured: googleAuth.isConfigured(),
-    clientId: isConfigured('GOOGLE_CLIENT_ID'),
-    clientSecret: isConfigured('GOOGLE_CLIENT_SECRET'),
-    stateSecret: isConfigured('GOOGLE_OAUTH_STATE_SECRET'),
-  },
-  cherry: {
-    configured:
-      isConfigured('CHERRY_APP_ID') && isConfigured('CHERRY_APP_SECRET'),
-    appId: isConfigured('CHERRY_APP_ID') ? 'configured' : 'missing',
-    appSecret: isConfigured('CHERRY_APP_SECRET') ? 'configured' : 'missing',
-  },
-  webBaseUrl: process.env.BATTLECITY_WEB_BASE_URL || '(same origin)',
-  blob: {
-    configured: isConfigured('BLOB_READ_WRITE_TOKEN'),
-  },
-  broadcaster: {
-    configured:
-      isConfigured('WEBSOCKET_BROADCASTER_BASE_URL') &&
-      isConfigured('BROADCASTER_SERVICE_TOKEN'),
-    baseUrl: process.env.WEBSOCKET_BROADCASTER_BASE_URL || null,
-    serviceToken: isConfigured('BROADCASTER_SERVICE_TOKEN')
-      ? 'configured'
-      : 'missing',
-  },
-  presale: {
-    configured: presaleService.isConfigured(),
-    network: process.env.BATTLECITY_PRESALE_NETWORK || null,
-    treasury: isConfigured('BATTLECITY_PRESALE_TREASURY_ADDRESS'),
-      tokenMint: isConfigured('BATTLECITY_PRESALE_TOKEN_MINT'),
-      distributionAddress: isConfigured('BATTLECITY_PRESALE_DISTRIBUTION_ADDRESS'),
-      distributionKeypairPath: isConfigured('BATTLECITY_PRESALE_DISTRIBUTION_KEYPAIR_PATH'),
-    pythApiKey: isConfigured('BATTLECITY_PRESALE_PYTH_API_KEY'),
-    quoteSecret: isConfigured('BATTLECITY_PRESALE_QUOTE_SECRET'),
-  },
-  x: {
-    configured: xOAuth.isConfigured(),
-    clientId: isConfigured('X_CLIENT_ID'),
-    clientSecret: isConfigured('X_CLIENT_SECRET'),
-    bearerToken: isConfigured('X_BEARER_TOKEN'),
-    stateSecret: isConfigured('X_OAUTH_STATE_SECRET'),
-    redirectUri: process.env.X_OAUTH_REDIRECT_URI || null,
-    target: process.env.X_BATTLECITIES_USER_ID || process.env.X_BATTLECITIES_USERNAME || null,
-  },
+  storage: { postgres: storage.hasDatabaseConfig(), local: !storage.isProductionRuntime() && !storage.hasDatabaseConfig() },
+  login: { providers: ['guest', 'wallet'] },
+  shop: { treasuryOverride: configured('BATTLECITY_SHOP_TREASURY_ADDRESS'), quoteSecret: configured('BATTLECITY_SHOP_QUOTE_SECRET') },
+  skr: { mint: configured('BATTLECITY_SKR_MINT'), decimals: configured('BATTLECITY_SKR_DECIMALS') },
+  social: { x: require('../src/services/xOAuth').isConfigured(), discord: configured('DISCORD_CLIENT_ID') && configured('DISCORD_CLIENT_SECRET') },
+  notifications: { firebase: require('../src/services/firebaseMessaging').isConfigured() },
+  competitions: { deliveryEnabled: process.env.BATTLECITY_LEADERBOARD_REWARDS_ENABLED === '1' },
 };
-
 console.log(JSON.stringify(status, null, 2));
-
-if (
-  !status.postgres.configured ||
-  !status.google.configured ||
-  !status.cherry.configured ||
-  !status.broadcaster.configured ||
-  !status.presale.configured ||
-  !status.x.configured
-) {
-  process.exitCode = 1;
-}
-
-function isConfigured(name) {
-  return String(process.env[name] || '').trim() !== '';
-}
-
-function describeDatabase(value) {
-  if (value === '') {
-    return { host: null, name: null };
-  }
-  try {
-    const url = new URL(value);
-    return {
-      host: url.hostname,
-      name: url.pathname.replace(/^\//, '') || null,
-    };
-  } catch {
-    return { host: '(invalid URL)', name: null };
-  }
-}
+if (!status.storage.postgres && !status.storage.local) process.exitCode = 1;

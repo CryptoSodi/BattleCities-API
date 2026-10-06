@@ -16,7 +16,6 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const result = await adminStore.listMatches({
       status: url.searchParams.get('status'),
-      category: url.searchParams.get('category'),
       limit: url.searchParams.get('limit'),
       offset: url.searchParams.get('offset'),
     });

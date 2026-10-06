@@ -9,16 +9,11 @@
     "outDir": "dist",
     "rootDir": "..",
     "skipLibCheck": true,
-    "target": "es2020",
-    "baseUrl": "..",
-    "paths": {
-      "@battlecities/shared": ["shared/src/index.ts"]
-    }
+    "target": "es2020"
   },
   "include": [
     "api/**/*.ts",
     "src/**/*.ts",
-    "src/**/*.js",
-    "../shared/src/**/*.ts"
+    "src/**/*.js"
   ]
 }

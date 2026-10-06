@@ -191,7 +191,7 @@ function isValidRedirectUri(value) {
 
 function createFrontendRedirect(pathname) {
   // X connection belongs to the public site. Keep this separate from the
-  // game-wide OAuth return URL, which is also used by Google and Discord.
+  // game-wide OAuth return URL, which is also used by Discord.
   const baseUrl = String(
     process.env.BATTLECITY_X_WEB_BASE_URL || process.env.BATTLECITY_WEB_BASE_URL || '',
   ).trim();

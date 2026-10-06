@@ -7,17 +7,14 @@
 const buckets = new Map();
 
 const LIMITS = {
+  'session-create': { max: 20, windowMs: 60 * 1000 },
+  'wallet-challenge': { max: 20, windowMs: 60 * 1000 },
   'matches-submit': { max: 10, windowMs: 60 * 1000 },
   'swap-verify': { max: 20, windowMs: 60 * 1000 },
-  'quest-claim': { max: 20, windowMs: 60 * 1000 },
   'discord-verification-code': { max: 5, windowMs: 60 * 1000 },
-  'staking-action': { max: 20, windowMs: 60 * 1000 },
   'presence-heartbeat': { max: 120, windowMs: 60 * 1000 },
-  'presale-quote': { max: 20, windowMs: 60 * 1000 },
-  'presale-verify': { max: 20, windowMs: 60 * 1000 },
   'shop-purchase-quote': { max: 20, windowMs: 60 * 1000 },
   'shop-purchase-verify': { max: 20, windowMs: 60 * 1000 },
-  'cherry-embed-token': { max: 20, windowMs: 60 * 1000 },
   'x-oauth-start': { max: 10, windowMs: 60 * 1000 },
   'native-oauth-start': { max: 10, windowMs: 60 * 1000 },
   'skr-swap-quote': { max: 20, windowMs: 60 * 1000 },

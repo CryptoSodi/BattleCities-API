@@ -85,7 +85,7 @@ async function handleVerifyCommand(
   return discordMessage(
     request,
     result.ok
-      ? 'Discord verified. Return to Battle Cities to see your completed quest.'
+      ? 'Discord verified. Return to Battle Cities to see your verified social task.'
       : result.error || 'Discord verification failed.',
   );
 }

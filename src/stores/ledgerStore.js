@@ -7,7 +7,7 @@ const database = require('../database');
 // Append-only economy ledger (see docs/mattle-inspired-infrastructure-plan.md,
 // "Core Data Model > Economy"). Every balance/inventory change gets an entry
 // with a reason and a source, so rewards and purchases stay auditable and
-// later systems (seasons, quests, airdrops) can attach their context ids.
+// competition and social reward systems can attach their context ids.
 //
 // Storage follows the shared pattern: Postgres when configured, one local
 // JSON file per player (array of entries) for dev/fallback.

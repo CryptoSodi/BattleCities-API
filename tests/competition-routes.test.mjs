@@ -43,10 +43,10 @@ test('new private endpoints reject unauthenticated access', async () => {
 test('admin prices are access controlled and immediately reflected in the shop catalog', async (t) => {
   t.mock.method(identity, 'resolveSession', () => 'session-test');
   let email = 'ordinary@example.com';
-  t.mock.method(sessions, 'readSession', async () => ({ playerId: 'ply-test', provider: 'google', googleEmail: email }));
-  t.mock.method(players, 'readPlayer', async () => ({ id: 'ply-test', provider: 'google', displayName: 'Test Player' }));
+  t.mock.method(sessions, 'readSession', async () => ({ playerId: 'ply-test', provider: 'wallet', walletAddress: email }));
+  t.mock.method(players, 'readPlayer', async () => ({ id: 'ply-test', provider: 'wallet', walletAddress: email, displayName: 'Test Player' }));
   assert.equal((await admin.GET(req('admin/competitions'))).status, 403);
-  email = 'tassaduq009@gmail.com';
+  email = '9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo';
   const value = { ...config.defaults(), seasonPass: { enabled: true, solPrice: '0.05', skrPrice: '200' } };
   assert.equal((await admin.PUT(req('admin/competitions', 'PUT', value))).status, 200);
   const response = await catalog.GET(req('economy/catalog'));

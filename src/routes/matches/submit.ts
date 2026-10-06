@@ -3,8 +3,6 @@ declare const require: any;
 import { createJsonResponse, createOptionsResponse } from '../_helpers';
 
 const database = require('../../database');
-const playerPolicy = require('../../services/playerPolicy');
-const eventStore = require('../../stores/eventStore');
 const matchResultStore = require('../../stores/matchResultStore');
 const playerStore = require('../../stores/playerStore');
 const rateLimiter = require('../../services/rateLimiter');
@@ -46,14 +44,14 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { ok: false, error: 'Invalid JSON' }, 400);
   }
 
+  if (body?.mode && body.mode !== 'single') {
+    return json(request, { ok: false, error: 'Only single-player matches are supported' }, 400);
+  }
+
   const result = await database.withTransaction(async () => {
     const season = await seasonStore.getCurrentSeason();
     const submitted = await matchResultStore.submitResult(player, season, body);
 
-    // Feed the SERVER-derived result into live event quests (Milestone 3).
-    if (!playerPolicy.isVirtualPlayer(player)) {
-      await eventStore.applyMatchResult(player, submitted);
-    }
     return submitted;
   });
 

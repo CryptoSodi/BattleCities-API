@@ -38,7 +38,7 @@ beforeEach(async () => {
 afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 async function record(id, overrides = {}) {
   const value = { id, playerId: player.id, provider: 'wallet', walletAddress: wallet, displayName: player.displayName,
-    seasonId: season.id, score: 1000, gamePoints: 100, validationStatus: 'accepted', prizeReview: { decision: 'accepted' }, createdAt: '2026-10-05T10:00:00.000Z', ...overrides };
+    seasonId: season.id, mode: 'single', score: 1000, gamePoints: 100, validationStatus: 'accepted', prizeReview: { decision: 'accepted' }, createdAt: '2026-10-05T10:00:00.000Z', ...overrides };
   await fs.writeFile(path.join(root, 'matches', `${id}.json`), JSON.stringify(value)); return value;
 }
 function settings() { return { ...config.defaults(), seasonPass: { enabled: true, skrPrice: '500', solPrice: '0.1' },

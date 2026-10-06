@@ -4,21 +4,15 @@
   "buildCommand": "npm run deploy:migrate",
   "outputDirectory": "public",
   "fluid": true,
-  "regions": ["bom1"],
+  "regions": [
+    "bom1"
+  ],
   "functions": {
     "api/router.ts": {
       "maxDuration": 60
-    },
-    "api/ws-latency.ts": {
-      "maxDuration": 60,
-      "regions": ["bom1"]
     }
   },
   "rewrites": [
-    {
-      "source": "/api/ws-latency",
-      "destination": "/api/ws-latency"
-    },
     {
       "source": "/api/:path*",
       "destination": "/api/router?__route=:path*"

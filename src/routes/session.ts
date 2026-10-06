@@ -5,6 +5,7 @@ import { createJsonResponse, createOptionsResponse } from './_helpers';
 const sessionIdentity = require('../services/sessionIdentity');
 const sessionStore = require('../stores/sessionStore');
 const walletAuth = require('../services/walletAuth');
+const rateLimiter = require('../services/rateLimiter');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -40,6 +41,18 @@ export async function POST(request: Request): Promise<Response> {
     body = await request.json();
   } catch {
     return json(request, { error: 'Invalid JSON' }, 400);
+  }
+
+  if (body?.provider === 'guest') {
+    const currentId = sessionIdentity.resolveSession(request.headers.get('cookie') || '');
+    const current = currentId ? await sessionStore.readSession(currentId) : null;
+    if (current !== null) return json(request, sessionStore.toPublicSession(current));
+    if (!rateLimiter.allow('session-create', request.headers.get('x-forwarded-for') || 'local')) {
+      return json(request, { error: 'Too many requests' }, 429);
+    }
+    const guest = await sessionStore.createGuestSession();
+    return json(request, sessionStore.toPublicSession(guest), 201,
+      sessionIdentity.createSessionCookie(guest.id, request.headers.get('origin')));
   }
 
   if (body?.provider !== 'wallet') {
@@ -82,6 +95,9 @@ export async function PUT(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid wallet address' }, 400);
   }
 
+  if (!rateLimiter.allow('wallet-challenge', request.headers.get('x-forwarded-for') || 'local')) {
+    return json(request, { error: 'Too many requests' }, 429);
+  }
   const challenge = await walletAuth.createChallenge(body.walletAddress);
 
   return json(request, challenge, 201);

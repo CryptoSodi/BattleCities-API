@@ -8,6 +8,7 @@ export function OPTIONS(request: Request): Response { return createOptionsRespon
 export async function POST(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);
   if (!player) return createJsonResponse(request, { error: 'Authentication required' }, 401);
+  if (player.provider !== 'wallet') return createJsonResponse(request, { error: 'Wallet login required' }, 403);
   if (!limiter.allow('native-oauth-start', player.id)) return createJsonResponse(request, { error: 'Too many requests' }, 429);
   try {
     const body = await request.json();
@@ -19,6 +20,7 @@ export async function POST(request: Request): Promise<Response> {
 export async function GET(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);
   if (!player) return createJsonResponse(request, { error: 'Authentication required' }, 401);
+  if (player.provider !== 'wallet') return createJsonResponse(request, { error: 'Wallet login required' }, 403);
   try {
     const item = await store.readStatus(new URL(request.url).searchParams.get('flowId'), player.id);
     return createJsonResponse(request, item ? { item } : { error: 'Connection not found' }, item ? 200 : 404);

@@ -77,7 +77,7 @@ async function submitResult(player, season, input) {
     displayName:
       typeof player.displayName === 'string' ? player.displayName : 'Player',
     seasonId: season.id,
-    mode: facts.mode === 'multi' ? 'multi' : 'single',
+    mode: 'single',
     levelNumber: clampInteger(facts.levelNumber, 1, MAX_LEVEL_INPUT),
     score: clampInteger(facts.score, 0, MAX_SCORE_INPUT),
     gamePoints: computeGamePoints(facts),
@@ -142,7 +142,7 @@ async function getLeaderboard(seasonId, limit = 20, acceptedOnly = false) {
     await ensureSchema();
     const params = [];
     // Guests are virtual players — never ranked (services/playerPolicy.js).
-    let where = `validation_status <> 'rejected' AND provider <> 'guest'`;
+    let where = `validation_status <> 'rejected' AND provider = 'wallet' AND mode = 'single'`;
     if (acceptedOnly) where += ` AND validation_status = 'accepted'
       AND EXISTS (SELECT 1 FROM battlecity_match_prize_reviews review
         WHERE review.result_id = ${TABLE_NAME}.id AND review.decision = 'accepted')`;
@@ -211,7 +211,7 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, pl
   if (hasPersistentConfig()) {
     await ensureSchema();
     const params = [start.toISOString(), end.toISOString()];
-    let where = `validation_status <> 'rejected' AND provider <> 'guest'
+    let where = `validation_status <> 'rejected' AND provider = 'wallet' AND mode = 'single'
       AND created_at >= $1 AND created_at < $2`;
     if (acceptedOnly) where += ` AND validation_status = 'accepted'
       AND EXISTS (SELECT 1 FROM battlecity_match_prize_reviews review
@@ -252,6 +252,29 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, pl
     .filter((row) => row.rank <= safeLimit || row.playerId === playerId);
 }
 
+// Personal totals include guest progress without admitting guests to rankings.
+async function getPlayerStats(playerId) {
+  if (!isValidPlayerId(playerId)) return { rank: null, totalPoints: 0, matches: 0 };
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(`SELECT COALESCE(SUM(game_points), 0)::bigint AS total_points,
+      COUNT(*)::integer AS matches FROM ${TABLE_NAME}
+      WHERE player_id = $1 AND mode = 'single' AND validation_status <> 'rejected'`, [playerId]);
+    return { rank: null, totalPoints: Number(result.rows[0].total_points), matches: Number(result.rows[0].matches) };
+  }
+  let files;
+  try { files = await fs.readdir(getDataDir()); } catch (error) { if (error.code === 'ENOENT') return { rank: null, totalPoints: 0, matches: 0 }; throw error; }
+  const stats = { rank: null, totalPoints: 0, matches: 0 };
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    const result = JSON.parse(await fs.readFile(path.join(getDataDir(), file), 'utf8'));
+    if (result.playerId === playerId && result.mode === 'single' && result.validationStatus !== 'rejected') {
+      stats.totalPoints += Number(result.gamePoints) || 0; stats.matches++;
+    }
+  }
+  return stats;
+}
+
 // Rank + totals of a single player in a scope; null when they have no
 // results there. Rank counts players with strictly more points, mirroring
 // the leaderboard's ordering.
@@ -268,7 +291,7 @@ async function getPlayerRank(playerId, seasonId) {
     await ensureSchema();
     const params = [];
     // Guests are virtual players — never ranked (services/playerPolicy.js).
-    let where = `validation_status <> 'rejected' AND provider <> 'guest'`;
+    let where = `validation_status <> 'rejected' AND provider = 'wallet' AND mode = 'single'`;
     if (scopeSeasonId !== null) {
       params.push(scopeSeasonId);
       where += ` AND season_id = $${params.length}
@@ -333,8 +356,8 @@ async function getPlayerResults(playerId, limit = 10, offset = 0) {
           m.game_points, m.won, m.validation_status, m.created_at,
           (r.id IS NOT NULL) AS replay_available
         FROM ${TABLE_NAME} m
-        LEFT JOIN battlecity_replays r ON r.id = m.replay_id
-        WHERE m.player_id = $1 AND m.validation_status <> 'rejected'
+        LEFT JOIN battlecity_replays r ON r.id = m.replay_id AND r.player_id = m.player_id
+        WHERE m.player_id = $1 AND m.mode = 'single' AND m.validation_status <> 'rejected'
         ORDER BY m.created_at DESC
         LIMIT $2
         OFFSET $3
@@ -373,7 +396,7 @@ async function getPlayerResults(playerId, limit = 10, offset = 0) {
         await fs.readFile(path.join(getDataDir(), file), 'utf8'),
       );
       if (
-        result.playerId === playerId &&
+        result.playerId === playerId && result.mode === 'single' &&
         result.validationStatus !== 'rejected'
       ) {
         results.push(toPublicResult(result));
@@ -399,7 +422,7 @@ async function getPlayerResultCount(playerId) {
       `
         SELECT COUNT(*) AS total
         FROM ${TABLE_NAME}
-        WHERE player_id = $1 AND validation_status <> 'rejected'
+        WHERE player_id = $1 AND mode = 'single' AND validation_status <> 'rejected'
       `,
       [playerId],
     );
@@ -423,7 +446,7 @@ async function getPlayerResultCount(playerId) {
         await fs.readFile(path.join(getDataDir(), file), 'utf8'),
       );
       if (
-        result.playerId === playerId &&
+        result.playerId === playerId && result.mode === 'single' &&
         result.validationStatus !== 'rejected'
       ) {
         total += 1;
@@ -448,9 +471,9 @@ async function getPublicPlayerReplay(playerId, resultId) {
     `
       SELECT r.replay_json, r.single_player_session_id
       FROM ${TABLE_NAME} m
-      JOIN battlecity_replays r ON r.id = m.replay_id
+      JOIN battlecity_replays r ON r.id = m.replay_id AND r.player_id = m.player_id
       WHERE m.id = $1
-        AND m.player_id = $2
+        AND m.player_id = $2 AND m.mode = 'single'
         AND m.validation_status <> 'rejected'
       LIMIT 1
     `,
@@ -512,7 +535,7 @@ async function aggregateFileResults(scopeSeasonId, acceptedOnly = false) {
     }
     if (acceptedOnly && (result.validationStatus !== 'accepted' || result.prizeReview?.decision !== 'accepted')) continue;
     // Guests are virtual players — never ranked (services/playerPolicy.js).
-    if (result.provider === 'guest') {
+    if (result.provider !== 'wallet' || result.mode !== 'single') {
       continue;
     }
     if (scopeSeasonId !== null && result.seasonId !== scopeSeasonId) {
@@ -549,7 +572,7 @@ async function aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedO
     try { result = JSON.parse(await fs.readFile(path.join(getDataDir(), file), 'utf8')); } catch { continue; }
     const createdAt = Date.parse(result?.createdAt);
     if (!Number.isFinite(createdAt) || createdAt < start.getTime() || createdAt >= end.getTime()) continue;
-    if (result.validationStatus === 'rejected' || result.provider === 'guest') continue;
+    if (result.validationStatus === 'rejected' || result.provider !== 'wallet' || result.mode !== 'single') continue;
     if (acceptedOnly && (result.validationStatus !== 'accepted' || result.prizeReview?.decision !== 'accepted')) continue;
     if (scopeSeasonId !== null && result.seasonId !== scopeSeasonId) continue;
     const row = byPlayer.get(result.playerId) || { playerId: result.playerId, walletAddress: result.walletAddress || null, displayName: result.displayName || 'Player', totalPoints: 0, matches: 0 };
@@ -599,12 +622,12 @@ function isValidPlayer(value) {
     value !== null &&
     isValidPlayerId(value.id) &&
     (value.provider === 'guest' ||
-      value.provider === 'wallet' ||
-      value.provider === 'google')
+      value.provider === 'wallet')
   );
 }
 
 module.exports = {
+  getPlayerStats,
   computeGamePoints,
   getLeaderboard,
   getLeaderboardInWindow,

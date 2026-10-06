@@ -49,7 +49,7 @@ export function createCorsHeaders(
   headers.set('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   headers.set(
     'access-control-allow-headers',
-    'content-type, authorization, x-battlecities-headless',
+    'content-type, authorization',
   );
   headers.set('vary', 'origin');
 

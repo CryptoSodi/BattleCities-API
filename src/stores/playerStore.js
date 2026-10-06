@@ -51,32 +51,8 @@ async function findOrCreateWalletPlayer(walletAddress) {
   });
 }
 
-async function findOrCreateGooglePlayer(profile) {
-  if (!isValidGoogleProfile(profile)) {
-    throw new Error('Invalid Google profile');
-  }
-
-  const existing = await findByIdentity('googleSubject', profile.sub);
-  if (existing !== null) {
-    const updated = {
-      ...existing,
-      displayName: profile.name || existing.displayName,
-      googleEmail: profile.email || existing.googleEmail,
-      googleName: profile.name || existing.googleName,
-      googlePicture: profile.picture || existing.googlePicture,
-    };
-    await updatePlayer(updated);
-    return updated;
-  }
-
-  return createPlayer({
-    provider: 'google',
-    displayName: profile.name || 'Google Player',
-    googleSubject: profile.sub,
-    googleEmail: profile.email || null,
-    googleName: profile.name || null,
-    googlePicture: profile.picture || null,
-  });
+async function createGuestPlayer() {
+  return createPlayer({ provider: 'guest', displayName: `Guest-${crypto.randomBytes(3).toString('hex').toUpperCase()}` });
 }
 
 async function readPlayer(id) {
@@ -89,8 +65,7 @@ async function readPlayer(id) {
     const result = await getPgPool().query(
       `
         SELECT id, provider, display_name, created_at, updated_at,
-          last_seen_at, wallet_address, google_subject, google_email,
-          google_name, google_picture, highscore_primary, highscore_secondary
+          last_seen_at, wallet_address, highscore_primary, highscore_secondary
         FROM ${TABLE_NAME}
         WHERE id = $1
         LIMIT 1
@@ -125,17 +100,13 @@ async function createPlayer(input) {
     updatedAt: now,
     lastSeenAt: now,
     walletAddress: input.walletAddress || null,
-    googleSubject: input.googleSubject || null,
-    googleEmail: input.googleEmail || null,
-    googleName: input.googleName || null,
-    googlePicture: input.googlePicture || null,
     highscorePrimary: 0,
     highscoreSecondary: 0,
   };
 
   if (hasPersistentConfig()) {
     await ensureSchema();
-    await getPgPool().query(
+    const inserted = await getPgPool().query(
       `
         INSERT INTO ${TABLE_NAME}
           (
@@ -145,13 +116,11 @@ async function createPlayer(input) {
             created_at,
             updated_at,
             last_seen_at,
-            wallet_address,
-            google_subject,
-            google_email,
-            google_name,
-            google_picture
+            wallet_address
           )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (wallet_address) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+        RETURNING *
       `,
       [
         player.id,
@@ -161,13 +130,9 @@ async function createPlayer(input) {
         player.updatedAt,
         player.lastSeenAt,
         player.walletAddress,
-        player.googleSubject,
-        player.googleEmail,
-        player.googleName,
-        player.googlePicture,
       ],
     );
-    return player;
+    return fromRow(inserted.rows[0]);
   }
 
   await ensureDataDir();
@@ -183,12 +148,11 @@ async function findByIdentity(field, value) {
 
   if (hasPersistentConfig()) {
     await ensureSchema();
-    const column = field === 'walletAddress' ? 'wallet_address' : 'google_subject';
+    const column = 'wallet_address';
     const result = await getPgPool().query(
       `
         SELECT id, provider, display_name, created_at, updated_at,
-          last_seen_at, wallet_address, google_subject, google_email,
-          google_name, google_picture, highscore_primary, highscore_secondary
+          last_seen_at, wallet_address, highscore_primary, highscore_secondary
         FROM ${TABLE_NAME}
         WHERE ${column} = $1
         LIMIT 1
@@ -234,19 +198,13 @@ async function updatePlayer(player) {
         UPDATE ${TABLE_NAME}
         SET display_name = $1,
           updated_at = $2,
-          last_seen_at = $3,
-          google_email = $4,
-          google_name = $5,
-          google_picture = $6
-        WHERE id = $7
+          last_seen_at = $3
+        WHERE id = $4
       `,
       [
         updated.displayName,
         updated.updatedAt,
         updated.lastSeenAt,
-        updated.googleEmail,
-        updated.googleName,
-        updated.googlePicture,
         updated.id,
       ],
     );
@@ -286,8 +244,7 @@ async function mergeHighscores(id, primary, secondary) {
           last_seen_at = $3
         WHERE id = $4
         RETURNING id, provider, display_name, created_at, updated_at,
-          last_seen_at, wallet_address, google_subject, google_email,
-          google_name, google_picture, highscore_primary, highscore_secondary
+          last_seen_at, wallet_address, highscore_primary, highscore_secondary
       `,
       [highscorePrimary, highscoreSecondary, new Date().toISOString(), id],
     );
@@ -316,9 +273,6 @@ function toPublicPlayer(player) {
     provider: player.provider,
     displayName: player.displayName,
     walletAddress: player.walletAddress,
-    googleEmail: player.googleEmail,
-    googleName: player.googleName,
-    googlePicture: player.googlePicture,
     highscorePrimary: normalizeHighscore(player.highscorePrimary),
     highscoreSecondary: normalizeHighscore(player.highscoreSecondary),
     createdAt: player.createdAt,
@@ -335,10 +289,6 @@ function fromRow(row) {
     updatedAt: new Date(row.updated_at).toISOString(),
     lastSeenAt: new Date(row.last_seen_at).toISOString(),
     walletAddress: row.wallet_address,
-    googleSubject: row.google_subject,
-    googleEmail: row.google_email,
-    googleName: row.google_name,
-    googlePicture: row.google_picture,
     highscorePrimary: normalizeHighscore(row.highscore_primary),
     highscoreSecondary: normalizeHighscore(row.highscore_secondary),
   };
@@ -376,23 +326,11 @@ function isValidPlayer(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidPlayerId(value.id) &&
-    (value.provider === 'wallet' || value.provider === 'google') &&
+    (value.provider === 'wallet' || value.provider === 'guest') &&
     typeof value.displayName === 'string' &&
     typeof value.createdAt === 'string' &&
     typeof value.updatedAt === 'string' &&
     typeof value.lastSeenAt === 'string'
-  );
-}
-
-function isValidGoogleProfile(value) {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof value.sub === 'string' &&
-    value.sub.length > 0 &&
-    (typeof value.email === 'string' || typeof value.email === 'undefined') &&
-    (typeof value.name === 'string' || typeof value.name === 'undefined') &&
-    (typeof value.picture === 'string' || typeof value.picture === 'undefined')
   );
 }
 
@@ -406,7 +344,7 @@ function isValidWalletAddress(value) {
 }
 
 module.exports = {
-  findOrCreateGooglePlayer,
+  createGuestPlayer,
   findOrCreateWalletPlayer,
   isPersistentStoreConfigured: hasPersistentConfig,
   mergeHighscores,

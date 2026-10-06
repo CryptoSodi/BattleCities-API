@@ -30,7 +30,7 @@ export async function GET(request: Request): Promise<Response> {
     return json(request, { authenticated: false });
   }
 
-  const rank = await matchResultStore.getPlayerRank(player.id, null);
+  const rank = await matchResultStore.getPlayerStats(player.id);
   const pointsPerLevel = Math.max(1, Math.floor(Number(process.env.BATTLECITY_POINTS_PER_LEVEL) || 1000));
   const totalPoints = Math.max(0, rank?.totalPoints || 0);
   return json(request, {

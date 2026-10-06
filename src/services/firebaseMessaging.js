@@ -1,8 +1,9 @@
-const { GoogleAuth } = require('google-auth-library');
+const crypto = require('node:crypto');
 
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
-let authClient = null;
+let accessToken = null;
+let tokenRequest = null;
 let serviceAccount = null;
 
 async function sendToToken(token, payload) {
@@ -11,11 +12,12 @@ async function sendToToken(token, payload) {
   }
 
   const credentials = getServiceAccount();
-  const client = await getAuthClient(credentials);
-  const response = await client.request({
-    url: `https://fcm.googleapis.com/v1/projects/${credentials.project_id}/messages:send`,
+  const bearer = await getAccessToken(credentials);
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${credentials.project_id}/messages:send`, {
     method: 'POST',
-    data: {
+    headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({
       message: {
         token,
         data: {
@@ -34,9 +36,16 @@ async function sendToToken(token, payload) {
           },
         },
       },
-    },
+    }),
   });
-  return response.data;
+  const body = await response.json();
+  if (!response.ok) {
+    const error = new Error('Firebase messaging request failed');
+    error.response = { data: body, status: response.status };
+    if (response.status === 401) accessToken = null;
+    throw error;
+  }
+  return body;
 }
 
 function isConfigured() {
@@ -77,12 +86,32 @@ function getServiceAccountValue() {
   return String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
 }
 
-async function getAuthClient(credentials) {
-  if (authClient === null) {
-    const auth = new GoogleAuth({ credentials, scopes: [FCM_SCOPE] });
-    authClient = await auth.getClient();
-  }
-  return authClient;
+// Firebase service-account authentication, independent of player login.
+// https://developers.google.com/identity/protocols/oauth2/service-account
+async function getAccessToken(credentials) {
+  if (accessToken && accessToken.expiresAt > Date.now() + 60000) return accessToken.value;
+  if (tokenRequest) return tokenRequest;
+  tokenRequest = (async () => {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const header = { alg: 'RS256', typ: 'JWT' };
+    if (credentials.private_key_id) header.kid = credentials.private_key_id;
+    const unsigned = `${encode(header)}.${encode({ iss: credentials.client_email,
+      scope: FCM_SCOPE, aud: 'https://oauth2.googleapis.com/token', iat: issuedAt, exp: issuedAt + 3600 })}`;
+    const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), credentials.private_key).toString('base64url');
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', signal: AbortSignal.timeout(15000),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: `${unsigned}.${signature}` }),
+    });
+    const body = await response.json();
+    if (!response.ok || typeof body.access_token !== 'string' || !(Number(body.expires_in) > 0)) {
+      throw new Error('Firebase service-account authentication failed');
+    }
+    accessToken = { value: body.access_token, expiresAt: Date.now() + Number(body.expires_in) * 1000 };
+    return accessToken.value;
+  })();
+  try { return await tokenRequest; } finally { tokenRequest = null; }
 }
 
 function normalizeText(value, fallback) {

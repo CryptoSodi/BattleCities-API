@@ -19,9 +19,8 @@ export async function GET(request: Request): Promise<Response> {
     authenticated: true,
     admin: {
       playerId: authorization.player.id,
-      email: authorization.email,
-      name: authorization.session.googleName || authorization.player.displayName,
-      picture: authorization.session.googlePicture || null,
+      walletAddress: authorization.walletAddress,
+      name: authorization.player.displayName,
     },
   });
 }

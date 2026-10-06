@@ -156,55 +156,6 @@ async function upsertAccountForPlayer(player, snapshot) {
   return normalized;
 }
 
-async function purchaseItemForPlayer(player, itemId, currency) {
-  if (!isValidPlayer(player)) {
-    throw new Error('Invalid player');
-  }
-
-  const item = SHOP_CATALOG[itemId];
-  if (item === undefined) {
-    return { ok: false, statusText: 'ITEM NOT FOUND' };
-  }
-
-  const account = await ensureAccountForPlayer(player);
-  const paymentCurrency = currency === 'sol' ? 'sol' : 'token';
-
-  if (paymentCurrency === 'sol') {
-    if (account.solBalance < item.solPrice) {
-      return { ok: false, statusText: 'NEED MORE SOL' };
-    }
-
-    account.solBalance = Number((account.solBalance - item.solPrice).toFixed(4));
-  } else if (account.tokenBalance < item.price) {
-    return { ok: false, statusText: 'NEED MORE BACT' };
-  } else {
-    account.tokenBalance -= item.price;
-  }
-
-  if (typeof item.fuel === 'number' && item.fuel > 0) {
-    account.fuelBalance += item.fuel;
-  }
-
-  if (item.inventory !== undefined) {
-    Object.keys(item.inventory).forEach((key) => {
-      account.inventory[key] = (account.inventory[key] || 0) + item.inventory[key];
-    });
-  }
-
-  account.updatedAt = new Date().toISOString();
-  await writeAccount(account);
-
-  const txHash = createMockTransactionHash();
-  await appendPurchaseLedgerEntries(account, item, itemId, paymentCurrency, txHash);
-
-  return {
-    ok: true,
-    statusText: `BOUGHT ${itemId.toUpperCase()}`,
-    txHash,
-    account: toPublicAccount(account),
-  };
-}
-
 function getShopCatalogItem(itemId) {
   const item = SHOP_CATALOG[itemId];
   return item === undefined ? null : { ...item };
@@ -377,87 +328,6 @@ async function appendPurchaseLedgerEntries(
   await ledgerStore.appendEntries(entries);
 }
 
-// Debits tokens from a player's account (e.g. locking a stake). Returns the
-// updated account, or null when the balance is insufficient. The CALLER is
-// responsible for the matching ledger entries.
-async function debitTokens(player, amount) {
-  if (!isValidPlayer(player)) {
-    throw new Error('Invalid player');
-  }
-
-  const safeAmount = Math.floor(Number(amount));
-  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
-    return null;
-  }
-
-  const account = await ensureAccountForPlayer(player);
-  if (account.tokenBalance < safeAmount) {
-    return null;
-  }
-
-  account.tokenBalance -= safeAmount;
-  account.updatedAt = new Date().toISOString();
-  await writeAccount(account);
-
-  return account;
-}
-
-// Fuel used to enter multiplayer matches must be changed by the API, not by
-// a client account snapshot. Callers wrap this in the same transaction as the
-// room assignment so a charge can never exist without its match membership.
-async function debitFuel(player, amount, context = {}) {
-  if (!isValidPlayer(player)) {
-    throw new Error('Invalid player');
-  }
-
-  const safeAmount = Math.floor(Number(amount));
-  if (!Number.isFinite(safeAmount) || safeAmount <= 0) {
-    return null;
-  }
-
-  return database.withTransaction(async () => {
-    let account;
-    if (hasPersistentConfig()) {
-      account = await lockAccountForFuelMutation(player);
-      const updated = await getPgPool().query(
-        `
-          UPDATE ${TABLE_NAME}
-          SET fuel_balance = fuel_balance - $2, updated_at = $3
-          WHERE player_id = $1 AND fuel_balance >= $2
-          RETURNING player_id, provider, wallet_address, token_balance,
-            sol_balance, fuel_balance, inventory_json, loadout_json,
-            created_at, updated_at
-        `,
-        [player.id, safeAmount, new Date().toISOString()],
-      );
-      if (updated.rowCount === 0) {
-        return null;
-      }
-      account = normalizeAccount(fromRow(updated.rows[0]));
-    } else {
-      account = await ensureAccountForPlayer(player);
-      if (account.fuelBalance < safeAmount) {
-        return null;
-      }
-      account.fuelBalance -= safeAmount;
-      account.updatedAt = new Date().toISOString();
-      await writeAccount(account);
-    }
-
-    await ledgerStore.appendEntries({
-      playerId: player.id,
-      walletAddress: player.walletAddress || null,
-      currency: 'fuel',
-      amount: -safeAmount,
-      reason: context.reason || 'multiplayer-entry',
-      sourceType: context.sourceType || 'multiplayer-match',
-      sourceId: context.sourceId || null,
-      eventId: context.eventId || null,
-    });
-    return account;
-  });
-}
-
 async function creditFuel(player, amount, context = {}) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
@@ -496,8 +366,8 @@ async function creditFuel(player, amount, context = {}) {
       walletAddress: player.walletAddress || null,
       currency: 'fuel',
       amount: safeAmount,
-      reason: context.reason || 'multiplayer-refund',
-      sourceType: context.sourceType || 'multiplayer-match',
+      reason: context.reason || 'fuel-reward',
+      sourceType: context.sourceType || 'reward',
       sourceId: context.sourceId || null,
       eventId: context.eventId || null,
     });
@@ -533,29 +403,6 @@ async function lockAccountForFuelMutation(player) {
     );
   }
   return normalizeAccount(fromRow(result.rows[0]));
-}
-
-// Credits soft rewards (fuel/token) to a player's account — used by quest
-// claims and other reward flows. The CALLER is responsible for the matching
-// ledger entries (it knows the reason/source context).
-async function creditRewards(player, rewards) {
-  if (!isValidPlayer(player)) {
-    throw new Error('Invalid player');
-  }
-
-  const fuel = Math.max(0, Math.floor(Number(rewards?.fuel) || 0));
-  const token = Math.max(0, Math.floor(Number(rewards?.token) || 0));
-  if (fuel === 0 && token === 0) {
-    return readAccount(player.id);
-  }
-
-  const account = await ensureAccountForPlayer(player);
-  account.fuelBalance += fuel;
-  account.tokenBalance += token;
-  account.updatedAt = new Date().toISOString();
-  await writeAccount(account);
-
-  return account;
 }
 
 async function writeAccount(account) {
@@ -820,13 +667,6 @@ function isValidLoadoutSlot(value) {
   );
 }
 
-function createMockTransactionHash() {
-  const random = Math.floor(Math.random() * 0xffffff)
-    .toString(16)
-    .padStart(6, '0');
-  return `MOCKTX-${Date.now().toString(36)}-${random}`;
-}
-
 function isValidPlayerId(value) {
   return typeof value === 'string' && /^ply-[a-z0-9-]+$/i.test(value);
 }
@@ -836,20 +676,16 @@ function isValidPlayer(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidPlayerId(value.id) &&
-    (value.provider === 'wallet' || value.provider === 'google')
+    (value.provider === 'wallet' || value.provider === 'guest')
   );
 }
 
 module.exports = {
   creditFuel,
-  creditRewards,
   consumePowerupForPlayer,
-  debitFuel,
-  debitTokens,
   ensureAccountForPlayer,
   getShopCatalogItem,
   grantOnChainPurchaseForPlayer,
-  purchaseItemForPlayer,
   readAccount,
   upsertAccountForPlayer,
   toPublicAccount,

@@ -46,20 +46,12 @@ async function createWalletSession(walletAddress) {
   });
 }
 
-async function createGoogleSession(profile) {
-  if (!isValidGoogleProfile(profile)) {
-    throw new Error('Invalid Google profile');
-  }
-
-  const player = await playerStore.findOrCreateGooglePlayer(profile);
-  return createSession('google', {
-    playerId: player.id,
-    googleProfile: profile,
-  });
+async function createGuestSession() {
+  const player = await playerStore.createGuestPlayer();
+  return createSession('guest', { playerId: player.id });
 }
 
 async function createSession(provider, identity) {
-  const googleProfile = identity.googleProfile || null;
   const now = new Date().toISOString();
   const session = {
     id: createSessionId(),
@@ -68,10 +60,6 @@ async function createSession(provider, identity) {
     lastSeenAt: now,
     playerId: identity.playerId,
     walletAddress: identity.walletAddress || null,
-    googleSubject: googleProfile?.sub || null,
-    googleEmail: googleProfile?.email || null,
-    googleName: googleProfile?.name || null,
-    googlePicture: googleProfile?.picture || null,
   };
 
   if (hasPersistentConfig()) {
@@ -85,13 +73,9 @@ async function createSession(provider, identity) {
             created_at,
             last_seen_at,
             player_id,
-            wallet_address,
-            google_subject,
-            google_email,
-            google_name,
-            google_picture
+            wallet_address
           )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6)
       `,
       [
         session.id,
@@ -100,10 +84,6 @@ async function createSession(provider, identity) {
         session.lastSeenAt,
         session.playerId,
         session.walletAddress,
-        session.googleSubject,
-        session.googleEmail,
-        session.googleName,
-        session.googlePicture,
       ],
     );
     return session;
@@ -125,8 +105,7 @@ async function readSession(id) {
     const result = await getPgPool().query(
       `
         SELECT id, provider, created_at, last_seen_at, player_id
-          , wallet_address, google_subject, google_email, google_name
-          , google_picture
+          , wallet_address
         FROM ${TABLE_NAME}
         WHERE id = $1
         LIMIT 1
@@ -146,10 +125,6 @@ async function readSession(id) {
       lastSeenAt: new Date(row.last_seen_at).toISOString(),
       playerId: row.player_id,
       walletAddress: row.wallet_address,
-      googleSubject: row.google_subject,
-      googleEmail: row.google_email,
-      googleName: row.google_name,
-      googlePicture: row.google_picture,
     };
     if (!isValidSession(session)) {
       return null;
@@ -216,9 +191,6 @@ function toPublicSession(session) {
     provider: session.provider,
     playerId: session.playerId,
     walletAddress: session.walletAddress || null,
-    googleEmail: session.googleEmail || null,
-    googleName: session.googleName || null,
-    googlePicture: session.googlePicture || null,
     createdAt: session.createdAt,
   };
 }
@@ -238,24 +210,15 @@ function isValidSession(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidSessionId(value.id) &&
-    (value.provider === 'wallet' || value.provider === 'google') &&
+    (value.provider === 'wallet' || value.provider === 'guest') &&
+    typeof value.playerId === 'string' && /^ply-[a-z0-9-]+$/i.test(value.playerId) &&
+    (value.provider !== 'wallet' || isValidWalletAddress(value.walletAddress)) &&
+    Date.parse(value.lastSeenAt) > Date.now() - 30 * 24 * 60 * 60 * 1000 &&
     typeof value.createdAt === 'string' &&
     typeof value.lastSeenAt === 'string' &&
     (value.walletAddress === null ||
       typeof value.walletAddress === 'undefined' ||
       isValidWalletAddress(value.walletAddress))
-  );
-}
-
-function isValidGoogleProfile(value) {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof value.sub === 'string' &&
-    value.sub.length > 0 &&
-    (typeof value.email === 'string' || typeof value.email === 'undefined') &&
-    (typeof value.name === 'string' || typeof value.name === 'undefined') &&
-    (typeof value.picture === 'string' || typeof value.picture === 'undefined')
   );
 }
 
@@ -269,7 +232,7 @@ function isValidWalletAddress(value) {
 }
 
 module.exports = {
-  createGoogleSession,
+  createGuestSession,
   createWalletSession,
   deleteSession,
   isPersistentStoreConfigured: hasPersistentConfig,

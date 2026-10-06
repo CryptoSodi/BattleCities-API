@@ -174,7 +174,7 @@ function formatCounts(online, inGame) {
 }
 
 function normalizeGameMode(value) {
-  return value === 'multiplayer' ? 'multiplayer' : 'single-player';
+  return 'single-player';
 }
 
 function getRecordKey(visitorId, clientId) {

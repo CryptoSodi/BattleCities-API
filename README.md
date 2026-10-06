@@ -1,350 +1,96 @@
-# BattleCities API server
+# Battle Cities API 0.3.0
 
-This package owns the canonical BattleCities HTTP dispatcher, routes, and
-backend modules. Configuration lives in `src/config`, request middleware in
-`src/middleware`, persistence in `src/stores`, and domain integrations and
-policies in `src/services`. The repository-root `api/router.ts` is only a
-compatibility entry for the existing frontend Vercel project. Root `routes/`
-and `server/` remain temporarily for the embedded webpack development API and
-backend jobs.
+Standalone HTTP API for the current single-player game and command center.
+Node.js 18+; PostgreSQL is required in production. Local JSON storage is for
+development and tests. Admin reporting and replay review require PostgreSQL.
 
-See [Competitions and native client API](COMPETITIONS.md) for season passes,
-admin pricing/prizes, payout history, native social linking, and SOL/SKR swaps.
+## Run
 
-## Local development
-
-From the repository root:
-
-```powershell
-$env:BATTLECITY_EMBED_BROADCASTER = '1'
-$env:BROADCASTER_BASE_URL = 'http://127.0.0.1:3001'
-$env:BROADCASTER_API_URL = 'http://127.0.0.1:3001'
-$env:BROADCASTER_PUBLIC_URL = 'http://127.0.0.1:3001'
-npm run server:build
-npm run server:start
-```
-
-With the API running, validate health, CORS, and signaling from another
-terminal:
-
-```powershell
-npm --prefix api-server run smoke
-```
-
-Or build and run the self-contained local smoke lifecycle:
-
-```powershell
-npm run api:build
-npm --prefix api-server run smoke:local
-```
-
-## Production deployment
-
-Production runs natively on Ubuntu as one Node process containing both the API
-and authoritative broadcaster. Build both outputs before starting:
-
-```bash
-npm run server:build
-npm run server:start
-```
-
-Configure `DATABASE_URL`, Google/Discord credentials,
-`BATTLECITY_WEB_BASE_URL`, and the embedded runtime values in
-`/etc/battlecities/api.env`. Use
-`BATTLECITY_DATABASE_POOL_SIZE=2` on the 1 GB server.
-
-For the Cherry chat embed, set both values in this same API-only environment:
-
-```env
-CHERRY_APP_ID=148185d2-9181-4e2f-9e4d-47e5b5c12f2a
-CHERRY_APP_SECRET=<secret created in the Cherry portal>
-```
-
-The secret is used exclusively by `POST /api/cherry-embed-token` to mint
-five-minute tokens for an authenticated wallet; never put it in the browser
-site, a public environment variable, or a commit.
-
-After deployment verify:
-
-```text
-https://api.battlecities.com/api/health
-https://api.battlecities.com/api/ready
-```
-
-The frontend Cloudflare Pages project only needs
-`BATTLECITY_API_BASE_URL=https://api.battlecities.com` and be redeployed.
-
-### Firebase Cloud Messaging
-
-Android devices register their FCM token through the authenticated API. To let
-the API send notifications, add the complete Firebase Admin service-account
-JSON as a base64-encoded, server-only environment variable:
-
-```env
-FIREBASE_SERVICE_ACCOUNT_BASE64=<base64 of the complete service-account JSON>
-```
-
-Never place this value in the frontend, Android source tree, or a committed
-`.env` file. `FIREBASE_SERVICE_ACCOUNT_JSON` remains available for local
-development only. The API uses the Firebase HTTP v1 endpoint through
-`google-auth-library`.
-
-The combined multiplayer values are:
-
-```env
-BATTLECITY_EMBED_BROADCASTER=1
-BROADCASTER_BASE_URL=http://127.0.0.1:3001
-BROADCASTER_API_URL=http://127.0.0.1:3001
-BROADCASTER_PUBLIC_URL=https://api.battlecities.com
-BROADCASTER_CLIENT_URL=https://play.battlecities.com
-```
-
-Embedded mode generates its private route-authorization token automatically at
-startup. The native Ubuntu setup is documented in
-[Deployment Environment Setup](../docs/environment-setup.md).
-
-### Discord verification
-
-Discord verification is owned by the native API. Configure these variables in
-`/etc/battlecities/api.env` only:
-
-```env
-# Required for signed Discord HTTP interactions and /verify CODE fallback
-DISCORD_APPLICATION_PUBLIC_KEY=<Discord Developer Portal General Information Public Key>
-DISCORD_GUILD_ID=<Battle Cities Discord server ID>
-
-# Required when automatic Discord OAuth verification is enabled
-DISCORD_CLIENT_ID=<Discord Application ID>
-DISCORD_CLIENT_SECRET=<Discord OAuth2 client secret>
-DISCORD_OAUTH_STATE_SECRET=<new strong random secret>
-DISCORD_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/discord/oauth/callback
-
-# Shared only with the Discord bot service; never the frontend
-DISCORD_BOT_SERVICE_TOKEN=<new strong random secret>
-
-# X OAuth follow connection
-X_CLIENT_ID=<X OAuth 2.0 client ID>
-X_CLIENT_SECRET=<X OAuth 2.0 client secret>
-X_BEARER_TOKEN=<X app-only bearer token>
-X_OAUTH_STATE_SECRET=<new strong random secret>
-X_OAUTH_REDIRECT_URI=https://api.battlecities.com/api/integrations/x/oauth/callback
-X_BATTLECITIES_USERNAME=BattleCitiesHQ
-X_BATTLECITIES_USER_ID=<optional stable numeric X user ID>
-```
-
-`DISCORD_APPLICATION_PUBLIC_KEY` is public application metadata, but every
-other Discord value above must remain private. Do not add any of them to the
-frontend Vercel project. `DISCORD_BOT_TOKEN` belongs only to the separate bot
-project and is not needed by the API for verification.
-
-`DISCORD_APP_PUBLIC_KEY` and `DISCORD_PUBLIC_KEY` are accepted as aliases for
-`DISCORD_APPLICATION_PUBLIC_KEY` to support existing Vercel configuration.
-
-In Discord Developer Portal configure these URLs after the API is deployed:
-
-```text
-Interactions Endpoint URL
-https://api.battlecities.com/api/integrations/discord/interactions
-
-OAuth2 Redirect URL
-https://api.battlecities.com/api/integrations/discord/oauth/callback
-```
-
-The signed interactions endpoint keeps `/verify CODE` as a fallback. The game
-uses the automatic OAuth flow at `/integrations/discord/oauth/start`; it uses
-`identify` and `guilds.members.read` to confirm that the logged-in player
-belongs to `DISCORD_GUILD_ID`.
-
-The Discord bot reads role-assignment state through the bot-only endpoint:
-
-```text
-GET /api/integrations/discord/verified-users/:discordUserId
-Authorization: Bearer <DISCORD_BOT_SERVICE_TOKEN>
-```
-
-It returns only `{ ok, discordUserId, verified }`. The bot owns its
-`DISCORD_BOT_TOKEN`, role ID, and role assignment; those values must not be
-configured on this API.
-
-Production migration builds use a PostgreSQL advisory lock, so overlapping
-deployments wait for one another instead of applying the same migration
-concurrently. Failed migrations stop the deployment before it is published.
-
-Database migrations, readiness checks, and the schema/fallback inventory are
-documented in [`docs/database.md`](docs/database.md).
-
-The API listens at `http://127.0.0.1:3001` by default. In a second terminal,
-run the frontend through the standalone API proxy:
-
-```powershell
-$env:BATTLECITY_USE_STANDALONE_API = '1'
+```sh
+npm ci
+npm run db:migrate
+npm run build
 npm start
 ```
 
-Useful variables:
+The listener defaults to `127.0.0.1:3001`. Configure `DATABASE_URL`,
+`BATTLECITY_DATABASE_SSL`, `BATTLECITY_API_HOST`, `PORT` and
+`BATTLECITY_WEB_BASE_URL`. Use `BATTLECITY_STORAGE_MODE=local` only for local
+development. `npm test` builds and runs the retained test suite; `npm run
+smoke:local` starts an isolated temporary API for read-only contract checks.
 
-- `PORT`: API port, default `3001`.
-- `BATTLECITY_API_HOST`: bind host, default `127.0.0.1`.
-- `BATTLECITY_API_PROXY_TARGET`: frontend development proxy target.
-- `BATTLECITY_API_BASE_URL`: browser API origin. Production defaults to
-  same-origin until this is set to `https://api.battlecities.com` in the
-  frontend Vercel project.
-- `BATTLECITY_WEB_BASE_URL`: game origin used after API-hosted Google and
-  Discord OAuth callbacks; set it to `https://play.battlecities.com` in
-  production.
-- `BATTLECITY_X_WEB_BASE_URL`: public-site origin used after the read-only X
-  connection/follow verification callback; set it to `https://battlecities.com`
-  in production.
-- `BATTLECITY_EVENT_ADMIN_SECRET`: bearer token required to approve final event
-  prize allocations after an event ends.
-- `BROADCASTER_BASE_URL`: loopback broadcaster-control origin; embedded
-  production uses `http://127.0.0.1:3001`.
-- `BROADCASTER_SERVICE_TOKEN`: generated automatically for embedded mode. Set it
-  manually only when running the legacy standalone broadcaster command.
+## Guest and wallet login
 
-## Multiplayer API
+Calls are relative to `/api`. Session responses set an HTTP-only
+`battlecity_session` cookie; clients must retain/send that cookie.
 
-Direct matchmaking consumes one unit of the authenticated player's server-side
-fuel balance. Event admission consumes the configured event fuel cost once and
-is never refundable. Reconnection reuses the existing membership without a new
-fuel charge, and public observers never occupy a player slot.
+- `POST /session` with `{ "provider": "guest" }` creates a server-generated
+  guest player. Repeating this call with a valid session resumes that identity.
+  Client-supplied player IDs cannot select another player's account.
+- `PUT /session` with `{ "walletAddress": "..." }` returns a five-minute
+  challenge (`nonce`, `message`). Sign the exact UTF-8 message with the wallet.
+- `POST /session` with `provider: "wallet"`, `walletAddress`, `nonce`, `message`
+  and the base64 `signature` authenticates a wallet. Challenges are single-use.
+- `GET /session` reads the session; `DELETE /session` logs out.
+- `GET/PUT /player` reads progress or merges personal high scores.
+- `GET /players/{id}/profile` reads the profile and paginated recent battles.
+  `/players/{id}/profile/matches/{resultId}/replay` reads saved replay stages.
 
-```text
-POST /api/multiplayer/direct/start
-GET  /api/multiplayer/matches/live
-GET  /api/multiplayer/matches/:matchId
-POST /api/multiplayer/matches/:matchId/reconnect
-POST /api/multiplayer/matches/:matchId/started
-POST /api/multiplayer/matches/:matchId/exit
-POST /api/multiplayer/matches/:matchId/observe
-POST /api/multiplayer/matches/:matchId/result  (broadcaster only)
+Guests have personal progress, inventory and powerup consumption. On-chain
+purchases, competition rankings/prizes, swaps and social rewards require a wallet.
+Guest history is separate from wallet history. Logout does not delete the player.
 
-GET  /api/multiplayer/archives                    (broadcaster only)
-GET  /api/multiplayer/archives/:matchId           (broadcaster only)
-GET  /api/multiplayer/archives/:matchId/frames    (broadcaster only)
-POST /api/multiplayer/archives/:matchId/start     (broadcaster only)
-POST /api/multiplayer/archives/:matchId/frames    (broadcaster only)
-POST /api/multiplayer/archives/:matchId/complete  (broadcaster only)
+## Retained game API
 
-POST /api/events/:eventId/enter
-POST /api/events/:eventId/start
-GET  /api/events/:eventId/leaderboard
-POST /api/events/:eventId/prizes/approve
+- `POST /matches/submit`: stores single-player facts and derives game points.
+  Client-supplied approval or points are ignored; prize approval remains manual.
+- `GET/POST /replays`, `POST /replays/validate`: recordings and metadata checks.
+- `GET /rankings`, `/leaderboard/rewards`, `/leaderboard/cycles`,
+  `/leaderboard/payouts`, `/seasons/current`, `/seasons/pass`: current cycles,
+  seasons, pass ownership, prize policy and history.
+- `GET /economy/catalog`, `GET/PUT /economy/account`, `GET /economy/ledger`,
+  `/economy/wallet-balance`, `POST /economy/purchase/quote`,
+  `/economy/purchase/verify`: catalog, balances, inventory/loadouts and checkout.
+- `POST /economy/powerups/consume`, `/economy/drops/roll`,
+  `/economy/drops/claim`: idempotent consumption and powerup drop delivery.
+- X and Discord linking, verification and fuel rewards, including native OAuth.
+- `/trading/tokens`, `/trading/verify-swap`, `/trading/swap/quote`,
+  `/trading/swap/execute`: shop swaps and verified trading rankings; no combat perks.
+- Presence, notification device registration, health and readiness.
 
-GET   /api/admin/session
-GET   /api/admin/overview
-GET   /api/admin/matches
-GET   /api/admin/players
-GET   /api/admin/tournaments
-POST  /api/admin/tournaments
-PATCH /api/admin/tournaments/:id
-GET   /api/admin/tournaments/:id/leaderboard
-POST  /api/admin/tournaments/:id/prizes/distribute
-```
+See [COMPETITIONS.md](COMPETITIONS.md) for SOL/SKR season pass pricing, full-season
+backfill, reward policy, approval gates and payout worker configuration.
 
-Normal waiting-room exits refund the fuel charged for that match. Event entry
-fuel is not refunded. The broadcaster submits both authoritative player scores;
-player-authenticated score submissions are rejected. Event leaderboards retain
-each real player's best accepted score and give tied scores the same rank. Prize
-approval records an explicit administrator-supplied allocation and does not
-transfer funds automatically.
+## Admin
 
-The headless broadcaster records every authoritative host frame in contiguous,
-idempotent PostgreSQL batches. Archive metadata includes both players, game
-type, level, seed, simulation configuration, final result, and score details.
-Apply all migrations, including `009_admin_tournaments`, before running the
-updated API:
+The web command center at `/admin/` uses wallet challenge login. Only the wallet
+allowlist in `src/middleware/admin.ts` can access admin routes. Guest sessions
+and legacy Google sessions cannot authorize an administrator.
 
-```powershell
-npm --prefix api-server run db:migrate
-```
+Retained controls: overview, single-player matches/replays, player search,
+X social tasks/connections, push notifications and live-user visibility.
+`GET/PUT /admin/competitions` controls pass prices and cycle/season prize tiers.
+`GET/POST /admin/match-reviews` lists and audits prize approval decisions.
+Settings/review APIs are available; their dashboard forms are future work.
 
-### Presale devnet API
+Firebase push delivery uses a service account (`FIREBASE_SERVICE_ACCOUNT_JSON`
+or `FIREBASE_SERVICE_ACCOUNT_BASE64`) independently of player authentication.
+No Google player login SDK or OAuth routes remain.
 
-The presale frontend reads the live state from `GET /api/presale/state` and
-creates and verifies SOL devnet purchases through `POST /api/presale/quote`
-and `POST /api/presale/verify`. Apply migrations through `018_presale_token_delivery.sql`
-before enabling these routes, then set the following values in the native API
-environment:
+## Migration and retired systems
 
-```text
-BATTLECITY_PRESALE_NETWORK=devnet
-BATTLECITY_PRESALE_TREASURY_ADDRESS=6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F
-BATTLECITY_PRESALE_TOKEN_MINT=feptDFpEGgFvxDwveWD6opDUCet5ve3f3WHPTBvBLvh
-BATTLECITY_PRESALE_SOLANA_RPC_URL=https://api.devnet.solana.com
-BATTLECITY_PRESALE_END_AT=2026-09-13T00:00:00.000Z
-BATTLECITY_PRESALE_QUOTE_SECRET=<32 random bytes encoded as hex; server only>
-BATTLECITY_PRESALE_DISTRIBUTION_ADDRESS=9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo
-BATTLECITY_PRESALE_DISTRIBUTION_KEYPAIR_PATH=/etc/battlecities/secrets/batc-distribution.json
-```
+Apply `031_guest_wallet_auth` before starting this release. It changes active
+provider constraints to guest/wallet. It preserves existing rows and historical
+migrations; legacy Google identities become inaccessible through login or profiles.
+No production data is deleted by this cleanup.
 
-Only SOL devnet payments are enabled. BATC stage prices are fixed in SOL, so
-quotes do not depend on an external market-price feed. A verified allocation is recorded by
-transaction signature and one-time quote ID, so submitting the same confirmed
-transaction remains idempotent while a quote cannot allocate BATC twice. Quote
-reservations are included in atomic stage-cap checks. After payment verification,
-the API creates the buyer's Token-2022 associated account when needed and transfers
-the exact BATC allocation from the distribution wallet. The signed delivery is
-stored before broadcast, and retries reuse the stored transaction until it expires,
-preventing duplicate delivery. Keep the distribution keypair outside the repository
-with mode `600`; the API never needs the treasury or mint-authority private key.
+Shop configuration now uses only `BATTLECITY_SHOP_*` settings. Rename any
+legacy `BATTLECITY_PRESALE_*` checkout settings before deploying. In particular,
+set `BATTLECITY_SHOP_QUOTE_SECRET` to a secret of at least 32 characters.
 
-### Mainnet game shop payments
-
-The shop creates wallet-signed mainnet transactions through
-`POST /api/economy/purchase/quote`, then verifies the confirmed transaction and
-grants the item through `POST /api/economy/purchase/verify`. SOL is paid to the
-treasury's native balance. BATC is paid to the treasury-owned Token-2022
-associated token account for the configured mint.
-
-```text
-BATTLECITY_SHOP_TREASURY_ADDRESS=6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F
-BATTLECITY_SHOP_TOKEN_MINT=Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz
-BATTLECITY_SHOP_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-BATTLECITY_SHOP_QUOTE_SECRET=<32+ random bytes; server only>
-```
-
-The shop falls back to the corresponding presale treasury, mint, RPC, and
-quote-secret variables when dedicated shop values are absent. No treasury,
-mint-authority, or distribution-wallet private key is used for shop payments.
-Apply migrations through `028_shop_onchain_payments.sql` before enabling these
-routes.
-
-### Mainnet BATC battlefield drops
-
-Offline single-player asks the API to select every battlefield drop before each
-eligible enemy drop. Only wallet-authenticated players can receive a BATC drop.
-Picking it up submits its one-time claim, and the API transfers Token-2022 BATC
-from a limited server-side reward wallet. Fund that wallet from the treasury;
-the API never needs the treasury or mint-authority private key. If the API is
-unavailable, ordinary powerups safely fall back to the local generator.
-
-```text
-BATTLECITY_DROP_REWARDS_ENABLED=0
-BATTLECITY_DROP_REWARD_NETWORK=mainnet-beta
-BATTLECITY_DROP_REWARD_TOKEN_MINT=Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz
-BATTLECITY_DROP_REWARD_SOURCE_ADDRESS=<limited server reward wallet address>
-BATTLECITY_DROP_REWARD_AUTHORITY_ADDRESS=<same wallet's signer address>
-BATTLECITY_DROP_REWARD_AUTHORITY_KEYPAIR_PATH=/etc/battlecities/secrets/batc-drop-rewards.json
-BATTLECITY_DROP_REWARD_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
-BATTLECITY_DROP_REWARD_100_BPS=200
-BATTLECITY_DROP_REWARD_200_BPS=100
-BATTLECITY_DROP_REWARD_CLAIM_TTL_MINUTES=30
-BATTLECITY_DROP_REWARD_MAX_ROLLS_PER_DAY=100
-BATTLECITY_DROP_REWARD_MAX_PLAYER_BATC_PER_DAY=400
-BATTLECITY_DROP_REWARD_MAX_GLOBAL_BATC_PER_DAY=10000
-```
-
-The default odds are 2% for 100 BATC and 1% for 200 BATC. Keep the feature
-disabled until the dedicated reward wallet is funded with BATC and enough SOL
-for transfer fees and associated-token-account rent. Its keypair must stay
-outside the repository with permissions `600`; never place the treasury or
-mint-authority key on the server. Apply `029_batc_powerup_drops.sql` first.
-
-Local storage mode writes archive metadata and JSONL frame batches under
-`server-data/match-archives`. Override that path with
-`BATTLECITY_MATCH_ARCHIVE_DIR` for isolated local tests.
-
-Do not add new HTTP behavior to the root route copies. New API work belongs in
-`api-server/src/routes`, with supporting code in `config`, `middleware`,
-`stores`, or `services` according to responsibility.
+Google login, multiplayer matchmaking/results/tournaments, WebRTC signaling,
+broadcaster/headless integration, diagnostic sockets, staking, airdrops,
+quests/campaigns, presale, combat boosts and Cherry token routes are retired.
+Requests to those routes return 404. Old web multiplayer clients must not point
+at this API. Separate legacy game/headless projects outside `api-server` remain
+outside this cleanup.

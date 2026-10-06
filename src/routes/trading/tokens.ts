@@ -8,8 +8,7 @@ export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
 
-// Token-to-trait catalog: groups (native/stable/listed/unlisted rule) and the
-// trait each listed token boosts.
+// Configured tokens available to the shop and trading rankings.
 export async function GET(request: Request): Promise<Response> {
   return createJsonResponse(request, {
     items: tradingStore.listTokens(),

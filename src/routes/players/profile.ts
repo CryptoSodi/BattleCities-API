@@ -38,7 +38,7 @@ export async function GET(
   const currentSeason = await seasonStore.getCurrentSeason();
   const page = readPage(request);
   const [allTime, season, recentMatches, totalMatches] = await Promise.all([
-    matchResultStore.getPlayerRank(player.id, null),
+    player.provider === 'guest' ? matchResultStore.getPlayerStats(player.id) : matchResultStore.getPlayerRank(player.id, null),
     matchResultStore.getPlayerRank(player.id, currentSeason.id),
     matchResultStore.getPlayerResults(
       player.id,
@@ -54,7 +54,7 @@ export async function GET(
       provider: player.provider,
       displayName: player.displayName,
       walletAddress: player.provider === 'wallet' ? player.walletAddress : null,
-      avatarUrl: player.provider === 'google' ? player.googlePicture : null,
+      avatarUrl: null,
       joinedAt: player.createdAt,
       lastSeenAt: player.lastSeenAt,
       highscores: {

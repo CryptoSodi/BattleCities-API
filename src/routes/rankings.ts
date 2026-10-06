@@ -6,7 +6,6 @@ const playerPolicy = require('../services/playerPolicy');
 const competitionStore = require('../stores/competitionStore');
 const tradingStore = require('../stores/tradingStore');
 const matchResultStore = require('../stores/matchResultStore');
-const perkBadges = require('../services/perkBadges');
 const playerStore = require('../stores/playerStore');
 const seasonStore = require('../stores/seasonStore');
 const sessionIdentity = require('../services/sessionIdentity');
@@ -42,13 +41,6 @@ export async function GET(request: Request): Promise<Response> {
     rows = period.rows || [];
   } else if (scope === 'gaming') {
       rows = await matchResultStore.getLeaderboard(seasonId, 20);
-      const badges = await perkBadges.getPerkBadges(
-        rows.map((row: any) => row.playerId),
-      );
-      rows = rows.map((row: any) => ({
-        ...row,
-        perks: badges[row.playerId] || [],
-      }));
   } else {
     rows = await tradingStore.getLeaderboard(season?.startsAt || null, season?.endsAt || null, 20, player?.id || null);
   }

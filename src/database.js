@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '030_competitions';
+const REQUIRED_MIGRATION = '031_guest_wallet_auth';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

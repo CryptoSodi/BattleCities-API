@@ -17,7 +17,7 @@ test('powerup consumption is authoritative and idempotent', async () => {
   const economy = require('../src/stores/economyStore');
   const player = {
     id: 'ply-powerup-test',
-    provider: 'google',
+    provider: 'guest',
     displayName: 'Powerup Test',
     walletAddress: null,
   };
@@ -25,7 +25,10 @@ test('powerup consumption is authoritative and idempotent', async () => {
     (await economy.ensureAccountForPlayer(player)).fuelBalance,
     5,
   );
-  await economy.purchaseItemForPlayer(player, 'shield', 'token');
+  const accountPath = path.join(root, 'economy', `${player.id}.json`);
+  const account = JSON.parse(await fs.readFile(accountPath, 'utf8'));
+  account.inventory.shield = 1;
+  await fs.writeFile(accountPath, JSON.stringify(account));
 
   const first = await economy.consumePowerupForPlayer(
     player,

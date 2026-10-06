@@ -4,29 +4,10 @@ const storageConfig = require('../config/storageConfig');
 const database = require('../database');
 const solanaRpc = require('../services/solanaRpc');
 
-// Trading volume + boost status (Milestone 5). The token catalog maps listed
-// tokens to traits (our tank language: Hull/Armor/Engine/Salvage); the native
-// token boosts All Stats; unlisted verified tokens combine into Armor —
-// exactly the plan's grouping rules. Every accepted swap is idempotent by
-// transaction signature.
-//
-// VERIFICATION MODES:
-//   'mock' — explicit dev only: trusts the submitted summary but still
-//     enforces signature idempotency, catalog rules, and eligible-pair rules.
-//   'rpc' (default) — fetches the confirmed transaction from Solana
-//     (BATTLECITY_SOLANA_RPC_URL, mainnet by default) and derives BOTH the
-//     swapped mint and the stable-side USD volume from on-chain balance
-//     changes; the client-declared mints/amounts are ignored. Swaps happen on
-//     approved programs configured in BATTLECITY_SWAP_PROGRAM_IDS.
-// SOL is priced via BATTLECITY_SOL_PRICE_USD until a price oracle is wired.
-
+// Chain-verified swap volume for trading rankings. Swaps never grant combat
+// perks. Every accepted swap is idempotent by transaction signature.
 const TABLE_NAME = 'battlecity_trading_volume';
-const VOLUME_WINDOW_DAYS = 30;
 const MAX_VOLUME_USD_PER_SWAP = 1000000;
-
-// 1% per this much 30-day USD volume, capped per trait.
-const BOOST_USD_PER_PERCENT = 100;
-const BOOST_MAX_PERCENT = 30;
 
 const STABLE_MINTS = {
   SOL: 'So11111111111111111111111111111111111111112',
@@ -34,29 +15,16 @@ const STABLE_MINTS = {
   USDT: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
 };
 
-// Native token mint. BACT launches on testnet first — set BATTLECITY_BACT_MINT
-// to the real mint address once the token exists; the placeholder keeps dev
-// working until then.
-function getNativeMint() {
-  return (
-    process.env.BATTLECITY_BACT_MINT ||
-    'BACT1111111111111111111111111111111111111111'
-  );
+function listTokens() {
+  const items = Object.entries(STABLE_MINTS).map(([symbol, mint]) => ({
+    mint, symbol, name: symbol, group: 'stable', featured: symbol === 'SOL',
+  }));
+  const skr = require('../services/skrToken').config();
+  if (skr) items.push({ mint: skr.mint, symbol: 'SKR', name: 'SKR', group: 'token', featured: true });
+  const mint = String(process.env.BATTLECITY_SHOP_TOKEN_MINT || require('../services/shopPaymentService').TOKEN_MINT).trim();
+  if (mint) items.push({ mint, symbol: 'BATC', name: 'Battle Cities', group: 'token', featured: true });
+  return items;
 }
-
-// Listed tokens -> traits. Native BACT boosts everything.
-const TOKEN_CATALOG = [
-  { mint: getNativeMint(), symbol: 'BACT', name: 'BATTLE CITY TOKEN', group: 'native', trait: 'all', featured: true },
-  { mint: STABLE_MINTS.SOL, symbol: 'SOL', name: 'SOLANA', group: 'stable', trait: null, featured: true },
-  { mint: STABLE_MINTS.USDC, symbol: 'USDC', name: 'USD COIN', group: 'stable', trait: null, featured: false },
-  { mint: STABLE_MINTS.USDT, symbol: 'USDT', name: 'TETHER', group: 'stable', trait: null, featured: false },
-  { mint: 'HULL11111111111111111111111111111111111111', symbol: 'IRON', name: 'IRONWORKS', group: 'listed', trait: 'hull', featured: true },
-  { mint: 'ARMR11111111111111111111111111111111111111', symbol: 'PLATE', name: 'PLATEGUARD', group: 'listed', trait: 'armor', featured: true },
-  { mint: 'ENGN11111111111111111111111111111111111111', symbol: 'NITRO', name: 'NITROCELL', group: 'listed', trait: 'engine', featured: true },
-  { mint: 'LUCK11111111111111111111111111111111111111', symbol: 'SCRAP', name: 'SCRAPFIND', group: 'listed', trait: 'salvage', featured: true },
-];
-
-const TRAITS = ['hull', 'armor', 'engine', 'salvage'];
 
 function getDataDir() {
   return (
@@ -84,48 +52,17 @@ async function ensureSchema() {
   await database.assertMigrationsApplied();
 }
 
-function listTokens() {
-  return TOKEN_CATALOG.map((token) => ({ ...token }));
-}
-
-function findToken(mint) {
-  return TOKEN_CATALOG.find((token) => token.mint === mint) || null;
-}
-
 function isStable(mint) {
-  const token = findToken(mint);
-  return token !== null && token.group === 'stable';
+  return Object.values(STABLE_MINTS).includes(mint);
 }
 
-// Classifies the non-stable side of a swap. Returns null when the mint can't
-// earn boosts (it's a stable itself).
-function classifyBoostMint(boostMint) {
-  const token = findToken(boostMint);
-
-  if (token === null) {
-    // Unlisted verified Solana token: broad, lower-trust volume -> Armor.
-    return { mint: boostMint, trait: 'armor', group: 'unlisted' };
-  }
-  if (token.group === 'native') {
-    return { mint: boostMint, trait: 'all', group: 'native' };
-  }
-  if (token.group === 'listed') {
-    return { mint: boostMint, trait: token.trait, group: 'listed' };
-  }
-
-  return null; // stable on the non-stable side: excluded
+function classifyToken(mint) {
+  return typeof mint === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(mint) && !isStable(mint) ? { mint } : null;
 }
 
-// Eligible pairs are Listed/Stable, Native/Stable, or Unlisted/Stable — the
-// non-stable side decides the trait. Returns null when ineligible.
-function resolveBoostTarget(fromMint, toMint) {
-  const fromStable = isStable(fromMint);
-  const toStable = isStable(toMint);
-  if (fromStable === toStable) {
-    return null; // stable/stable or token/token: no boost volume
-  }
-
-  return classifyBoostMint(fromStable ? toMint : fromMint);
+function resolveToken(fromMint, toMint) {
+  if (isStable(fromMint) === isStable(toMint)) return null;
+  return classifyToken(isStable(fromMint) ? toMint : fromMint);
 }
 
 function getSolPriceUsd() {
@@ -148,6 +85,7 @@ function hasApprovedSwapProgram(tx) {
 // Verifies and records one swap. Idempotent by signature: replays return
 // { ok: false, error: 'Already recorded' } and change nothing.
 async function recordSwap(player, input) {
+  if (!player || player.provider !== 'wallet') return { ok: false, error: 'Wallet login required' };
   const signature = typeof input?.signature === 'string' ? input.signature.trim() : '';
   if (!/^[1-9A-HJ-NP-Za-km-z]{20,128}$/.test(signature)) {
     return { ok: false, error: 'Invalid signature' };
@@ -186,22 +124,22 @@ async function recordSwap(player, input) {
       return { ok: false, error: facts.error };
     }
 
-    target = classifyBoostMint(facts.boostMint);
+    target = classifyToken(facts.tokenMint);
     if (target === null) {
-      return { ok: false, error: 'Pair not eligible for boosts' };
+      return { ok: false, error: 'Pair not eligible for trading volume' };
     }
     volumeUsd = facts.volumeUsd;
     fromMint = 'onchain';
-    toMint = facts.boostMint;
+    toMint = facts.tokenMint;
     if (!Number.isFinite(tx.blockTime) || tx.blockTime * 1000 > Date.now() + 60000) {
       return { ok: false, error: 'Transaction time is unavailable or invalid' };
     }
     executedAt = new Date(tx.blockTime * 1000).toISOString();
   } else {
     volumeUsd = Number(input?.volumeUsd);
-    target = resolveBoostTarget(fromMint, toMint);
+    target = resolveToken(fromMint, toMint);
     if (target === null) {
-      return { ok: false, error: 'Pair not eligible for boosts' };
+      return { ok: false, error: 'Pair not eligible for trading volume' };
     }
   }
 
@@ -214,7 +152,6 @@ async function recordSwap(player, input) {
     playerId: player.id,
     walletAddress: player.walletAddress || null,
     mint: target.mint,
-    trait: target.trait,
     volumeUsd: Math.round(volumeUsd * 100) / 100,
     swapFromMint: fromMint,
     swapToMint: toMint,
@@ -240,7 +177,7 @@ async function recordSwap(player, input) {
         record.playerId,
         record.walletAddress,
         record.mint,
-        record.trait,
+        'armor', // Retained historical NOT NULL column; no gameplay boost is computed.
         record.volumeUsd,
         record.swapFromMint,
         record.swapToMint,
@@ -270,101 +207,7 @@ async function recordSwap(player, input) {
   return { ok: true, record };
 }
 
-// 30-day per-trait boost percentages + volume rows for one player.
-async function getBoostStatus(playerId) {
-  const since = Date.now() - VOLUME_WINDOW_DAYS * 24 * 3600 * 1000;
-  const records = await listPlayerRecordsSince(playerId, since);
-
-  const volumeByTrait = { all: 0, hull: 0, armor: 0, engine: 0, salvage: 0 };
-  const byMint = new Map();
-  let totalVolume = 0;
-
-  for (const record of records) {
-    volumeByTrait[record.trait] += record.volumeUsd;
-    totalVolume += record.volumeUsd;
-
-    const token = findToken(record.mint);
-    const key = record.mint;
-    const row = byMint.get(key) || {
-      mint: record.mint,
-      symbol: token === null ? 'UNLISTED' : token.symbol,
-      group: token === null ? 'unlisted' : token.group,
-      trait: record.trait,
-      volumeUsd: 0,
-    };
-    row.volumeUsd += record.volumeUsd;
-    byMint.set(key, row);
-  }
-
-  const boosts = {};
-  TRAITS.forEach((trait) => {
-    const usd = volumeByTrait[trait] + volumeByTrait.all;
-    boosts[trait] = Math.min(
-      BOOST_MAX_PERCENT,
-      Math.floor(usd / BOOST_USD_PER_PERCENT),
-    );
-  });
-
-  return {
-    windowDays: VOLUME_WINDOW_DAYS,
-    totalVolumeUsd: Math.round(totalVolume * 100) / 100,
-    boosts,
-    rows: Array.from(byMint.values()).sort((a, b) => b.volumeUsd - a.volumeUsd),
-  };
-}
-
-async function listPlayerRecordsSince(playerId, sinceMs) {
-  if (hasPersistentConfig()) {
-    await ensureSchema();
-    const result = await getPgPool().query(
-      `
-        SELECT signature, mint, trait, volume_usd, created_at
-        FROM ${TABLE_NAME}
-        WHERE player_id = $1 AND created_at >= $2
-      `,
-      [playerId, new Date(sinceMs).toISOString()],
-    );
-    return result.rows.map((row) => ({
-      signature: row.signature,
-      mint: row.mint,
-      trait: row.trait,
-      volumeUsd: Number(row.volume_usd),
-      createdAt: new Date(row.created_at).toISOString(),
-    }));
-  }
-
-  let files;
-  try {
-    files = await fs.readdir(getDataDir());
-  } catch {
-    return [];
-  }
-
-  const records = [];
-  for (const file of files) {
-    if (!file.endsWith('.json')) {
-      continue;
-    }
-    try {
-      const record = JSON.parse(
-        await fs.readFile(path.join(getDataDir(), file), 'utf8'),
-      );
-      if (
-        record.playerId === playerId &&
-        Date.parse(record.createdAt) >= sinceMs
-      ) {
-        records.push(record);
-      }
-    } catch {
-      // Ignore malformed records.
-    }
-  }
-
-  return records;
-}
-
-// Only chain-verified swaps earn ranking or prize eligibility. Legacy/mock
-// records remain available to development boost tools, never to prize boards.
+// Only chain-verified swaps earn ranking or prize eligibility.
 async function getLeaderboard(startsAt = null, endsAt = null, limit = 20, playerId = null, prizeOnly = false) {
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
   if (hasPersistentConfig()) {
@@ -373,7 +216,7 @@ async function getLeaderboard(startsAt = null, endsAt = null, limit = 20, player
       SELECT v.player_id, MAX(p.wallet_address) AS wallet_address, MAX(p.display_name) AS display_name,
         SUM(v.volume_usd) AS total_points, COUNT(*)::integer AS matches
       FROM ${TABLE_NAME} v JOIN battlecity_players p ON p.id = v.player_id
-      WHERE v.verified = TRUE AND p.provider <> 'guest'
+      WHERE v.verified = TRUE AND p.provider = 'wallet'
         AND (NOT $5::boolean OR v.prize_eligible = TRUE)
         AND ($1::timestamptz IS NULL OR v.created_at >= $1)
         AND ($2::timestamptz IS NULL OR v.created_at < $2)
@@ -399,7 +242,7 @@ async function getLeaderboard(startsAt = null, endsAt = null, limit = 20, player
     let row = totals.get(r.playerId);
     if (!row) {
       const player = await players.readPlayer(r.playerId);
-      if (!player || player.provider === 'guest') continue;
+      if (!player || player.provider !== 'wallet') continue;
       row = { playerId: r.playerId, displayName: player.displayName, walletAddress: player.walletAddress,
         totalPoints: 0, matches: 0, perks: [] };
       totals.set(r.playerId, row);
@@ -413,10 +256,8 @@ async function getLeaderboard(startsAt = null, endsAt = null, limit = 20, player
 
 module.exports = {
   getLeaderboard,
-  getBoostStatus,
   getVerifyMode,
   listTokens,
   recordSwap,
-  resolveBoostTarget,
   isPersistentStoreConfigured: hasPersistentConfig,
 };

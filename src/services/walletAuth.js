@@ -104,8 +104,7 @@ async function verifyChallenge({ walletAddress, nonce, message, signature }) {
     return false;
   }
 
-  await markChallengeUsed(nonce);
-  return true;
+  return markChallengeUsed(nonce);
 }
 
 async function readChallenge(nonce) {
@@ -136,6 +135,7 @@ async function readChallenge(nonce) {
   }
 
   try {
+    try { await fs.access(`${getChallengePath(nonce)}.used`); return null; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const raw = await fs.readFile(getChallengePath(nonce), 'utf8');
     return JSON.parse(raw);
   } catch {
@@ -145,19 +145,17 @@ async function readChallenge(nonce) {
 
 async function markChallengeUsed(nonce) {
   const usedAt = new Date().toISOString();
-
   if (hasPersistentConfig()) {
-    await getPgPool().query(
-      `UPDATE ${TABLE_NAME} SET used_at = $1 WHERE nonce = $2`,
-      [usedAt, nonce],
-    );
-    return;
+    const result = await getPgPool().query(
+      `UPDATE ${TABLE_NAME} SET used_at = $1 WHERE nonce = $2 AND used_at IS NULL`, [usedAt, nonce]);
+    return result.rowCount === 1;
   }
-
-  const challenge = await readChallenge(nonce);
-  if (challenge !== null) {
-    challenge.usedAt = usedAt;
-    await fs.writeFile(getChallengePath(nonce), JSON.stringify(challenge), 'utf8');
+  try {
+    await fs.writeFile(`${getChallengePath(nonce)}.used`, usedAt, { flag: 'wx' });
+    return true;
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    throw error;
   }
 }
 

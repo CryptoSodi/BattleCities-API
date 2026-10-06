@@ -1,4 +1,4 @@
-# Competitions and native client API (0.2.0)
+# Competitions and native client API (0.3.0)
 
 All paths below are relative to `/api`. Authenticated calls use the existing
 `battlecity_session` cookie. Admin calls use the existing admin allowlist.
@@ -73,8 +73,8 @@ request; closed competitions preserve their policy and allocations.
 Payout statuses: `pending`, `wallet_required`, `prepared`, `paid`, `failed`.
 `failed` is retryable. Public records include the transaction signature, amount,
 rank, wallet and timestamps; signed transaction bytes and internal errors stay private.
-Google-only winners are retained as `wallet_required`; wallet linking/claiming for
-those accounts is not implemented by this change.
+Only wallet players enter new competition boards. Historical payout obligations
+remain stored; this cleanup does not delete or reallocate them.
 
 ## Prize approval and payout worker
 

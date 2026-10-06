@@ -12,7 +12,7 @@ export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
 
-// The caller's recent ledger entries (purchases, quest rewards, stakes,
+// The caller's recent ledger entries (purchases, social rewards,
 // claims) for the Treasury screen.
 export async function GET(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);

@@ -39,22 +39,18 @@ const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfc
 function getConfig() {
   const treasuryValue = String(
     process.env.BATTLECITY_SHOP_TREASURY_ADDRESS
-      || process.env.BATTLECITY_PRESALE_TREASURY_ADDRESS
       || TREASURY,
   ).trim();
   const tokenMintValue = String(
     process.env.BATTLECITY_SHOP_TOKEN_MINT
-      || process.env.BATTLECITY_PRESALE_TOKEN_MINT
       || TOKEN_MINT,
   ).trim();
   const quoteSecret = String(
     process.env.BATTLECITY_SHOP_QUOTE_SECRET
-      || process.env.BATTLECITY_PRESALE_QUOTE_SECRET
       || '',
   );
   const rpcUrl = String(
     process.env.BATTLECITY_SHOP_SOLANA_RPC_URL
-      || process.env.BATTLECITY_PRESALE_SOLANA_RPC_URL
       || PUBLIC_RPC_URL,
   );
 

@@ -1,15 +1,7 @@
 const database = require('../database');
 const storageConfig = require('../config/storageConfig');
 
-const MATCH_STATUSES = new Set([
-  'waiting',
-  'ready',
-  'live',
-  'transition',
-  'completed',
-  'closed',
-]);
-const MATCH_CATEGORIES = new Set(['direct', 'event']);
+const MATCH_STATUSES = new Set(['pending', 'accepted', 'rejected']);
 
 function assertPersistentStorage() {
   if (!storageConfig.hasDatabaseConfig()) {
@@ -24,18 +16,12 @@ async function getOverview() {
   await database.assertMigrationsApplied();
   const result = await database.getPool().query(`
     SELECT
-      (SELECT COUNT(*) FROM battlecity_players)::INTEGER AS players,
-      (SELECT COUNT(*) FROM battlecity_multiplayer_matches)::INTEGER AS matches,
-      (SELECT COUNT(*) FROM battlecity_multiplayer_matches
-        WHERE status IN ('waiting', 'ready', 'live', 'transition'))::INTEGER
-        AS active_matches,
-      (SELECT COUNT(*) FROM battlecity_multiplayer_matches
-        WHERE status = 'completed')::INTEGER AS completed_matches,
-      (SELECT COUNT(*) FROM battlecity_tournaments
-        WHERE status NOT IN ('cancelled', 'ended'))::INTEGER AS active_tournaments,
-      (SELECT COUNT(*) FROM battlecity_tournaments
-        WHERE status <> 'cancelled' AND ends_at <= NOW()
-          AND prizes_distributed_at IS NULL)::INTEGER AS pending_payouts
+      (SELECT COUNT(*) FROM battlecity_players WHERE provider IN ('guest', 'wallet'))::INTEGER AS players,
+      (SELECT COUNT(*) FROM battlecity_match_results WHERE mode = 'single' AND provider IN ('guest', 'wallet'))::INTEGER AS matches,
+      (SELECT COUNT(*) FROM battlecity_match_results WHERE mode = 'single' AND provider IN ('guest', 'wallet') AND validation_status = 'pending')::INTEGER AS pending_matches,
+      (SELECT COUNT(*) FROM battlecity_match_results WHERE mode = 'single' AND provider IN ('guest', 'wallet') AND validation_status = 'accepted')::INTEGER AS accepted_matches,
+      (SELECT COUNT(*) FROM battlecity_match_results WHERE mode = 'single' AND provider IN ('guest', 'wallet') AND validation_status = 'rejected')::INTEGER AS rejected_matches,
+      (SELECT COUNT(*) FROM battlecity_ranking_payouts WHERE status IN ('pending', 'prepared', 'failed'))::INTEGER AS pending_payouts
   `);
   return fromOverviewRow(result.rows[0]);
 }
@@ -46,43 +32,16 @@ async function listMatches(options = {}) {
   const limit = clampInteger(options.limit, 1, 100, 50);
   const offset = clampInteger(options.offset, 0, 100000, 0);
   const statuses = parseMatchStatuses(options.status);
-  const category = MATCH_CATEGORIES.has(options.category) ? options.category : null;
-
-  const result = await database.getPool().query(
-    `
-      SELECT
-        m.id, m.category, m.event_id, m.status, m.current_stage,
-        m.open_slots, m.broadcaster_status, m.broadcaster_started_at,
-        m.headless_target,
-        m.created_at, m.updated_at, m.started_at, m.completed_at, m.closed_at,
-        COUNT(*) OVER()::INTEGER AS total_count,
-        COALESCE(
-          JSONB_AGG(
-            JSONB_BUILD_OBJECT(
-              'playerId', p.player_id,
-              'playerSlot', p.player_slot,
-              'displayName', pl.display_name,
-              'provider', pl.provider,
-              'active', p.active,
-              'score', s.score,
-              'validationStatus', s.validation_status
-            ) ORDER BY p.player_slot, p.joined_at
-          ) FILTER (WHERE p.player_id IS NOT NULL),
-          '[]'::JSONB
-        ) AS players
-      FROM battlecity_multiplayer_matches m
-      LEFT JOIN battlecity_multiplayer_participants p ON p.match_id = m.id
-      LEFT JOIN battlecity_players pl ON pl.id = p.player_id
-      LEFT JOIN battlecity_multiplayer_scores s
-        ON s.match_id = p.match_id AND s.player_id = p.player_id
-      WHERE ($1::TEXT[] IS NULL OR m.status = ANY($1))
-        AND ($2::TEXT IS NULL OR m.category = $2)
-      GROUP BY m.id
-      ORDER BY m.created_at DESC
-      LIMIT $3 OFFSET $4
-    `,
-    [statuses, category, limit, offset],
-  );
+  const result = await database.getPool().query(`
+    SELECT m.*, p.display_name AS player_name, p.wallet_address AS player_wallet,
+      (r.id IS NOT NULL) AS replay_available, COUNT(*) OVER()::INTEGER AS total_count
+    FROM battlecity_match_results m
+    JOIN battlecity_players p ON p.id = m.player_id
+    LEFT JOIN battlecity_replays r ON r.id = m.replay_id AND r.player_id = m.player_id
+    WHERE p.provider IN ('wallet', 'guest') AND m.mode = 'single'
+      AND ($1::TEXT[] IS NULL OR m.validation_status = ANY($1))
+    ORDER BY m.created_at DESC, m.id DESC LIMIT $2 OFFSET $3`,
+    [statuses, limit, offset]);
 
   return {
     items: result.rows.map(fromMatchRow),
@@ -210,15 +169,8 @@ function parseMatchStatuses(value) {
   if (typeof value !== 'string' || value.trim() === '') {
     return null;
   }
-  const expanded = [];
-  for (const token of value.split(',').map((item) => item.trim())) {
-    if (token === 'active') {
-      expanded.push('waiting', 'ready', 'live', 'transition');
-    } else if (MATCH_STATUSES.has(token)) {
-      expanded.push(token);
-    }
-  }
-  return expanded.length === 0 ? null : expanded;
+  const statuses = value.split(',').map((item) => item.trim()).filter((item) => MATCH_STATUSES.has(item));
+  return statuses.length ? statuses : null;
 }
 
 async function listPlayers(options = {}) {
@@ -239,7 +191,7 @@ async function listPlayers(options = {}) {
   const result = await database.getPool().query(
     `
       SELECT
-        p.id, p.provider, p.display_name, p.google_email,
+        p.id, p.provider, p.display_name, p.wallet_address,
         p.highscore_primary, p.highscore_secondary,
         p.created_at, p.last_seen_at,
         COALESCE(e.token_balance, 0) AS token_balance,
@@ -247,25 +199,24 @@ async function listPlayers(options = {}) {
         COALESCE(e.fuel_balance, 0) AS fuel_balance,
         x.x_username AS x_username,
         x.follows_battlecities AS x_follows_battlecities,
-        COUNT(DISTINCT mp.match_id)::INTEGER AS matches_played,
-        COUNT(DISTINCT mp.match_id) FILTER (WHERE mm.status = 'completed')::INTEGER
-          AS matches_completed,
-        COALESCE(MAX(ms.score), 0)::BIGINT AS best_multiplayer_score,
+        COALESCE(stats.matches_played, 0) AS matches_played,
+        COALESCE(stats.matches_completed, 0) AS matches_completed,
+        COALESCE(stats.best_score, 0) AS best_score,
         COUNT(*) OVER()::INTEGER AS total_count
       FROM battlecity_players p
       LEFT JOIN battlecity_economy_accounts e ON e.player_id = p.id
       LEFT JOIN battlecity_x_connections x ON x.player_id = p.id
-      LEFT JOIN battlecity_multiplayer_participants mp ON mp.player_id = p.id
-      LEFT JOIN battlecity_multiplayer_matches mm ON mm.id = mp.match_id
-      LEFT JOIN battlecity_multiplayer_scores ms
-        ON ms.match_id = mp.match_id AND ms.player_id = p.id
-          AND ms.validation_status = 'accepted'
-      WHERE ($1::TEXT IS NULL OR p.display_name ILIKE $1 OR p.google_email ILIKE $1
-        OR p.id ILIKE $1)
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::INTEGER AS matches_played,
+          COUNT(*) FILTER (WHERE validation_status = 'accepted')::INTEGER AS matches_completed,
+          MAX(score) FILTER (WHERE validation_status <> 'rejected') AS best_score
+        FROM battlecity_match_results WHERE player_id = p.id AND mode = 'single'
+      ) stats ON TRUE
+      WHERE p.provider IN ('wallet', 'guest')
+        AND ($1::TEXT IS NULL OR p.display_name ILIKE $1 OR p.wallet_address ILIKE $1 OR p.id ILIKE $1)
         AND ($4::DATE IS NULL OR p.last_seen_at >= $4::DATE)
         AND ($5::DATE IS NULL OR p.last_seen_at < ($5::DATE + INTERVAL '1 day'))
         AND ($6::BOOLEAN = FALSE OR x.player_id IS NOT NULL)
-      GROUP BY p.id, e.player_id, x.x_username, x.follows_battlecities
       ORDER BY p.last_seen_at DESC
       LIMIT $2 OFFSET $3
     `,
@@ -284,32 +235,21 @@ function fromOverviewRow(row) {
   return {
     players: Number(row.players),
     matches: Number(row.matches),
-    activeMatches: Number(row.active_matches),
-    completedMatches: Number(row.completed_matches),
-    activeTournaments: Number(row.active_tournaments),
+    pendingMatches: Number(row.pending_matches),
+    acceptedMatches: Number(row.accepted_matches),
+    rejectedMatches: Number(row.rejected_matches),
     pendingPayouts: Number(row.pending_payouts),
   };
 }
 
 function fromMatchRow(row) {
   return {
-    id: row.id,
-    category: row.category,
-    eventId: row.event_id,
-    status: row.status,
-    currentStage: Number(row.current_stage),
-    openSlots: Array.isArray(row.open_slots) ? row.open_slots.map(Number) : [],
-    broadcasterStatus: row.broadcaster_status,
-    broadcasterStartedAt: toIso(row.broadcaster_started_at),
-    headlessTarget: ['worker', 'bom1'].includes(row.headless_target)
-      ? row.headless_target
-      : null,
-    players: Array.isArray(row.players) ? row.players : [],
+    id: row.id, playerId: row.player_id, displayName: row.player_name,
+    walletAddress: row.player_wallet, provider: row.provider, seasonId: row.season_id,
+    mode: row.mode, levelNumber: Number(row.level_number), score: Number(row.score),
+    gamePoints: Number(row.game_points), won: Boolean(row.won),
+    validationStatus: row.validation_status, replayId: row.replay_available ? row.replay_id : null,
     createdAt: toIso(row.created_at),
-    updatedAt: toIso(row.updated_at),
-    startedAt: toIso(row.started_at),
-    completedAt: toIso(row.completed_at),
-    closedAt: toIso(row.closed_at),
   };
 }
 
@@ -318,7 +258,7 @@ function fromPlayerRow(row) {
     id: row.id,
     provider: row.provider,
     displayName: row.display_name,
-    email: row.google_email,
+    walletAddress: row.wallet_address,
     highscorePrimary: Number(row.highscore_primary),
     highscoreSecondary: Number(row.highscore_secondary),
     tokenBalance: Number(row.token_balance),
@@ -328,7 +268,7 @@ function fromPlayerRow(row) {
     xFollowsBattleCities: Boolean(row.x_follows_battlecities),
     matchesPlayed: Number(row.matches_played),
     matchesCompleted: Number(row.matches_completed),
-    bestMultiplayerScore: Number(row.best_multiplayer_score),
+    bestScore: Number(row.best_score),
     createdAt: toIso(row.created_at),
     lastSeenAt: toIso(row.last_seen_at),
   };

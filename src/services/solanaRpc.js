@@ -1,4 +1,4 @@
-// Minimal Solana JSON-RPC client + swap-fact derivation for trading boost
+// Minimal Solana JSON-RPC client + swap-fact derivation for trading volume
 // verification. No SDK dependency — one HTTP call and pure JSON analysis.
 //
 // The swap venue is Raydium, but verification is venue-agnostic: we fetch the
@@ -54,7 +54,7 @@ async function getTransaction(signature, rpcUrl = getRpcUrl()) {
 // client-declared mints/amounts are ignored entirely.
 //
 // options: { stableMints: string[], solPriceUsd: number }
-// returns: { ok: true, boostMint, volumeUsd } | { ok: false, error }
+// returns: { ok: true, tokenMint, volumeUsd } | { ok: false, error }
 function deriveSwapFromTransaction(tx, walletAddress, options) {
   if (typeof tx !== 'object' || tx === null || typeof tx.meta !== 'object') {
     return { ok: false, error: 'Malformed transaction' };
@@ -99,9 +99,9 @@ function deriveSwapFromTransaction(tx, walletAddress, options) {
   collect(tx.meta.preTokenBalances, -1);
   collect(tx.meta.postTokenBalances, 1);
 
-  // The boosted side: the wallet's largest non-stable token movement.
-  let boostMint = null;
-  let boostAmount = 0;
+  // The token side: the wallet's largest non-stable token movement.
+  let tokenMint = null;
+  let tokenAmount = 0;
   // The stable side in USD: stable-token movement, or native SOL movement.
   let stableUsd = 0;
 
@@ -118,9 +118,9 @@ function deriveSwapFromTransaction(tx, walletAddress, options) {
       );
       continue;
     }
-    if (magnitude > boostAmount) {
-      boostAmount = magnitude;
-      boostMint = mint;
+    if (magnitude > tokenAmount) {
+      tokenAmount = magnitude;
+      tokenMint = mint;
     }
   }
 
@@ -131,7 +131,7 @@ function deriveSwapFromTransaction(tx, walletAddress, options) {
   const solMoved = Math.abs(postLamports - preLamports) / 1e9;
   stableUsd = Math.max(stableUsd, solMoved * solPriceUsd);
 
-  if (boostMint === null) {
+  if (tokenMint === null) {
     return { ok: false, error: 'No eligible token movement found' };
   }
   if (stableUsd <= 0) {
@@ -140,7 +140,7 @@ function deriveSwapFromTransaction(tx, walletAddress, options) {
 
   return {
     ok: true,
-    boostMint,
+    tokenMint,
     volumeUsd: Math.round(stableUsd * 100) / 100,
   };
 }
