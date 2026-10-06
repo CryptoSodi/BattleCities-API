@@ -11,14 +11,13 @@ const solanaRpc = require('../services/solanaRpc');
 // transaction signature.
 //
 // VERIFICATION MODES:
-//   'mock' (default) — dev only: trusts the submitted summary but still
+//   'mock' — explicit dev only: trusts the submitted summary but still
 //     enforces signature idempotency, catalog rules, and eligible-pair rules.
-//   'rpc' — trustless: fetches the confirmed transaction from Solana
-//     (BATTLECITY_SOLANA_RPC_URL, testnet by default) and derives BOTH the
+//   'rpc' (default) — fetches the confirmed transaction from Solana
+//     (BATTLECITY_SOLANA_RPC_URL, mainnet by default) and derives BOTH the
 //     swapped mint and the stable-side USD volume from on-chain balance
 //     changes; the client-declared mints/amounts are ignored. Swaps happen on
-//     Raydium, but verification is venue-agnostic. Set
-//     BATTLECITY_SWAP_VERIFY_MODE=rpc once the BACT testnet token exists.
+//     approved programs configured in BATTLECITY_SWAP_PROGRAM_IDS.
 // SOL is priced via BATTLECITY_SOL_PRICE_USD until a price oracle is wired.
 
 const TABLE_NAME = 'battlecity_trading_volume';
@@ -67,10 +66,10 @@ function getDataDir() {
 }
 
 function getVerifyMode() {
-  const mode = String(process.env.BATTLECITY_SWAP_VERIFY_MODE || 'mock')
+  const mode = String(process.env.BATTLECITY_SWAP_VERIFY_MODE || 'rpc')
     .trim()
     .toLowerCase();
-  return mode === 'rpc' ? 'rpc' : 'mock';
+  return mode === 'mock' && !storageConfig.isProductionRuntime() ? 'mock' : 'rpc';
 }
 
 function hasPersistentConfig() {
@@ -131,7 +130,19 @@ function resolveBoostTarget(fromMint, toMint) {
 
 function getSolPriceUsd() {
   const parsed = Number(process.env.BATTLECITY_SOL_PRICE_USD);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 150;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function hasApprovedSwapProgram(tx) {
+  const programs = new Set(String(process.env.BATTLECITY_SWAP_PROGRAM_IDS || 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4')
+    .split(',').map((p) => p.trim()).filter(Boolean));
+  const keys = tx.transaction?.message?.accountKeys || [];
+  const instructions = [...(tx.transaction?.message?.instructions || []),
+    ...(tx.meta?.innerInstructions || []).flatMap((item) => item.instructions || [])];
+  return instructions.some((i) => {
+    const key = keys[i.programIdIndex];
+    return programs.has(i.programId || (typeof key === 'string' ? key : key?.pubkey));
+  });
 }
 
 // Verifies and records one swap. Idempotent by signature: replays return
@@ -146,6 +157,8 @@ async function recordSwap(player, input) {
   let volumeUsd;
   let fromMint = String(input?.fromMint || '');
   let toMint = String(input?.toMint || '');
+  let executedAt = new Date().toISOString();
+  const verified = getVerifyMode() === 'rpc';
 
   if (getVerifyMode() === 'rpc') {
     // Trustless path: everything is derived from the confirmed on-chain
@@ -163,6 +176,7 @@ async function recordSwap(player, input) {
     if (tx === null) {
       return { ok: false, error: 'Transaction not found or not confirmed' };
     }
+    if (!hasApprovedSwapProgram(tx)) return { ok: false, error: 'No approved swap program was executed' };
 
     const facts = solanaRpc.deriveSwapFromTransaction(tx, player.walletAddress, {
       stableMints: Object.values(STABLE_MINTS),
@@ -179,6 +193,10 @@ async function recordSwap(player, input) {
     volumeUsd = facts.volumeUsd;
     fromMint = 'onchain';
     toMint = facts.boostMint;
+    if (!Number.isFinite(tx.blockTime) || tx.blockTime * 1000 > Date.now() + 60000) {
+      return { ok: false, error: 'Transaction time is unavailable or invalid' };
+    }
+    executedAt = new Date(tx.blockTime * 1000).toISOString();
   } else {
     volumeUsd = Number(input?.volumeUsd);
     target = resolveBoostTarget(fromMint, toMint);
@@ -200,7 +218,9 @@ async function recordSwap(player, input) {
     volumeUsd: Math.round(volumeUsd * 100) / 100,
     swapFromMint: fromMint,
     swapToMint: toMint,
-    createdAt: new Date().toISOString(),
+    createdAt: executedAt,
+    verified,
+    prizeEligible: verified && await require('./swapExecutionStore').isVerified(player.id, signature),
   };
 
   if (hasPersistentConfig()) {
@@ -210,9 +230,9 @@ async function recordSwap(player, input) {
         INSERT INTO ${TABLE_NAME}
           (
             signature, player_id, wallet_address, mint, trait, volume_usd,
-            swap_from_mint, swap_to_mint, created_at
+            swap_from_mint, swap_to_mint, created_at, verified, prize_eligible
           )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (signature) DO NOTHING
       `,
       [
@@ -225,6 +245,8 @@ async function recordSwap(player, input) {
         record.swapFromMint,
         record.swapToMint,
         record.createdAt,
+        record.verified,
+        record.prizeEligible,
       ],
     );
 
@@ -341,7 +363,56 @@ async function listPlayerRecordsSince(playerId, sinceMs) {
   return records;
 }
 
+// Only chain-verified swaps earn ranking or prize eligibility. Legacy/mock
+// records remain available to development boost tools, never to prize boards.
+async function getLeaderboard(startsAt = null, endsAt = null, limit = 20, playerId = null, prizeOnly = false) {
+  const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(`WITH totals AS (
+      SELECT v.player_id, MAX(p.wallet_address) AS wallet_address, MAX(p.display_name) AS display_name,
+        SUM(v.volume_usd) AS total_points, COUNT(*)::integer AS matches
+      FROM ${TABLE_NAME} v JOIN battlecity_players p ON p.id = v.player_id
+      WHERE v.verified = TRUE AND p.provider <> 'guest'
+        AND (NOT $5::boolean OR v.prize_eligible = TRUE)
+        AND ($1::timestamptz IS NULL OR v.created_at >= $1)
+        AND ($2::timestamptz IS NULL OR v.created_at < $2)
+      GROUP BY v.player_id), ranked AS (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY total_points DESC, player_id ASC) AS rank FROM totals)
+      SELECT * FROM ranked WHERE rank <= $3 OR player_id = $4 ORDER BY rank`,
+    [startsAt, endsAt, safeLimit, playerId, prizeOnly]);
+    return result.rows.map((r) => ({ playerId: r.player_id, walletAddress: r.wallet_address,
+      displayName: r.display_name, totalPoints: Number(r.total_points), volumeUsd: Number(r.total_points),
+      matches: Number(r.matches), rank: Number(r.rank), perks: [] }));
+  }
+  const players = require('./playerStore');
+  const totals = new Map();
+  let files;
+  try { files = await fs.readdir(getDataDir()); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    const r = JSON.parse(await fs.readFile(path.join(getDataDir(), file), 'utf8'));
+    const at = Date.parse(r.createdAt);
+    if (prizeOnly && !r.prizeEligible) continue;
+    if (!r.verified || !Number.isFinite(at) || (startsAt && at < Date.parse(startsAt))
+      || (endsAt && at >= Date.parse(endsAt)) || !Number.isFinite(r.volumeUsd) || r.volumeUsd <= 0) continue;
+    let row = totals.get(r.playerId);
+    if (!row) {
+      const player = await players.readPlayer(r.playerId);
+      if (!player || player.provider === 'guest') continue;
+      row = { playerId: r.playerId, displayName: player.displayName, walletAddress: player.walletAddress,
+        totalPoints: 0, matches: 0, perks: [] };
+      totals.set(r.playerId, row);
+    }
+    row.totalPoints += r.volumeUsd; row.matches++;
+  }
+  return Array.from(totals.values()).sort((a, b) => b.totalPoints - a.totalPoints || a.playerId.localeCompare(b.playerId))
+    .map((r, i) => ({ ...r, totalPoints: Math.round(r.totalPoints * 100) / 100, volumeUsd: Math.round(r.totalPoints * 100) / 100, rank: i + 1 }))
+    .filter((r) => r.rank <= safeLimit || r.playerId === playerId);
+}
+
 module.exports = {
+  getLeaderboard,
   getBoostStatus,
   getVerifyMode,
   listTokens,

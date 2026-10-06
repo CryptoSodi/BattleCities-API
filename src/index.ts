@@ -12,6 +12,8 @@ const path = require('path');
 const loadLocalEnv = require('./config/loadLocalEnv');
 const database = require('./database');
 const multiplayerStore = require('./stores/multiplayerStore');
+const competitions = require('./services/competitions');
+let stopCompetitionWorker = () => {};
 
 loadLocalEnv.loadLocalEnv();
 
@@ -58,6 +60,7 @@ async function start(): Promise<void> {
     console.log(`[battlecities-api] listening on http://${host}:${port}`);
   });
   scheduleStaleMatchSweep();
+  stopCompetitionWorker = competitions.startWorker();
 }
 
 const STALE_MATCH_SWEEP_MS = 60000;
@@ -340,6 +343,7 @@ async function sendFetchResponse(
 let shuttingDown = false;
 
 function shutdown(signal: string): void {
+  stopCompetitionWorker();
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[battlecities-api] ${signal} received; shutting down`);

@@ -32,10 +32,10 @@ function isConfigured() {
   );
 }
 
-function createAuthorizationUrl(origin, playerId, sessionId) {
+function createAuthorizationUrl(origin, playerId, sessionId, native = null) {
   const config = requireConfig();
   const redirectUri = getRedirectUri(origin);
-  const codeVerifier = crypto.randomBytes(32).toString('base64url');
+  const codeVerifier = native?.codeVerifier || crypto.randomBytes(32).toString('base64url');
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
@@ -43,7 +43,7 @@ function createAuthorizationUrl(origin, playerId, sessionId) {
     // X requires both read scopes for the authenticated /2/users/me lookup.
     // Keep this deliberately read-only: the app never posts or follows for a player.
     scope: 'tweet.read users.read',
-    state: createState({
+    state: native?.state || createState({
       playerId,
       sessionBinding: createSessionBinding(sessionId),
       redirectUri,
@@ -243,6 +243,10 @@ function base64UrlDecode(value) {
 }
 
 module.exports = {
+  async completeNative(code, codeVerifier) {
+    if (typeof code !== 'string' || code.length < 1 || code.length > MAX_CODE_LENGTH) throw new Error('Invalid X authorization code');
+    return fetchCurrentUser(await exchangeCode(code, getRedirectUri(''), codeVerifier));
+  },
   CALLBACK_PATH,
   CONNECTION_PURPOSE,
   completeConnection,

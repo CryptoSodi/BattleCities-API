@@ -8,6 +8,9 @@ compatibility entry for the existing frontend Vercel project. Root `routes/`
 and `server/` remain temporarily for the embedded webpack development API and
 backend jobs.
 
+See [Competitions and native client API](COMPETITIONS.md) for season passes,
+admin pricing/prizes, payout history, native social linking, and SOL/SKR swaps.
+
 ## Local development
 
 From the repository root:

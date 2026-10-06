@@ -1,6 +1,6 @@
 {
   "name": "@battlecities/api-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=18"
@@ -28,6 +28,8 @@
     "setup:check": "node scripts/check-setup.mjs",
     "setup:google": "node scripts/check-google-login.mjs",
     "start": "node dist/api-server/src/index.js",
-    "test:db": "node --test tests/database-config.test.mjs tests/migrations.test.mjs tests/multiplayer.test.mjs tests/match-archives.test.mjs tests/database-integration.test.mjs tests/presale.test.mjs tests/shop-payments.test.mjs tests/batc-powerup-drops.test.mjs tests/x-oauth.test.mjs"
+    "test:db": "node --test tests/database-config.test.mjs tests/migrations.test.mjs tests/multiplayer.test.mjs tests/match-archives.test.mjs tests/database-integration.test.mjs tests/presale.test.mjs tests/shop-payments.test.mjs tests/batc-powerup-drops.test.mjs tests/x-oauth.test.mjs tests/competitions.test.mjs tests/native-oauth-swaps.test.mjs",
+    "test:competitions": "node --test tests/competitions.test.mjs tests/native-oauth-swaps.test.mjs",
+    "test:api": "npm run build && node --test tests/competition-routes.test.mjs"
   }
 }

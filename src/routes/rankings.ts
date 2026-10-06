@@ -1,9 +1,10 @@
 declare const require: any;
 
-import { createJsonResponse, createOptionsResponse } from './_helpers';
+import { createJsonResponse, createOptionsResponse, resolveSessionPlayer } from './_helpers';
 
 const playerPolicy = require('../services/playerPolicy');
-const leaderboardSnapshotStore = require('../stores/leaderboardSnapshotStore');
+const competitionStore = require('../stores/competitionStore');
+const tradingStore = require('../stores/tradingStore');
 const matchResultStore = require('../stores/matchResultStore');
 const perkBadges = require('../services/perkBadges');
 const playerStore = require('../stores/playerStore');
@@ -15,10 +16,8 @@ export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
 
-// Hall of Fame data. scope=gaming|trading; seasonId scopes gaming rows to a
-// season ('' or 'all' => all-time). Trading rows are an empty placeholder
-// until Milestone 5 lands trading volume — the response shape is final so the
-// client tab can ship now.
+// Seasonal gaming scores require a pass; cycle and all-time scores do not.
+// Trading ranks use chain-verified volume within the selected season.
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const scope = url.searchParams.get('scope') === 'trading' ? 'trading' : 'gaming';
@@ -34,18 +33,14 @@ export async function GET(request: Request): Promise<Response> {
         : currentSeason.id
       : requestedSeasonId;
 
-  // A closed season serves its immutable snapshot (with the perks frozen at
-  // close time); live scopes compute fresh and resolve badges now.
+  const season = seasonId === null ? null : seasons.find((s: any) => s.id === seasonId);
+  if (seasonId !== null && !season) return createJsonResponse(request, { error: 'Season not found' }, 404);
+  const player = await resolveSessionPlayer(request);
+  const period = seasonId === null ? null : await competitionStore.getPeriod(`season:${scope}:${seasonId}`);
   let rows = [];
-  if (scope === 'gaming') {
-    const snapshot =
-      seasonId === null
-        ? null
-        : await leaderboardSnapshotStore.readSnapshot('gaming', seasonId);
-
-    if (snapshot !== null) {
-      rows = snapshot;
-    } else {
+  if (period?.closedAt) {
+    rows = period.rows || [];
+  } else if (scope === 'gaming') {
       rows = await matchResultStore.getLeaderboard(seasonId, 20);
       const badges = await perkBadges.getPerkBadges(
         rows.map((row: any) => row.playerId),
@@ -54,18 +49,26 @@ export async function GET(request: Request): Promise<Response> {
         ...row,
         perks: badges[row.playerId] || [],
       }));
-    }
+  } else {
+    rows = await tradingStore.getLeaderboard(season?.startsAt || null, season?.endsAt || null, 20, player?.id || null);
   }
 
-  const me = await resolveMe(request, scope, seasonId);
+  const me = period?.closedAt || scope === 'trading'
+    ? (player ? rows.find((r: any) => r.playerId === player.id) || { displayName: player.displayName, rank: null,
+        totalPoints: period?.closedAt ? null : 0, matches: period?.closedAt ? null : 0, outsideSnapshot: !!period?.closedAt } : null)
+    : await resolveMe(request, scope, seasonId);
+  const pass = player && seasonId && scope === 'gaming' ? await competitionStore.getPass(player.id, seasonId) : null;
 
   return createJsonResponse(request, {
     scope,
     seasonId,
+    archived: !!period?.closedAt,
+    snapshotLimit: period?.closedAt ? 100 : null,
     currentSeason: seasonStore.toPublicSeason(currentSeason),
     seasons: seasons.map((season: any) => seasonStore.toPublicSeason(season)),
-    rows: rows.map(toPublicRow),
+    rows: rows.filter((r: any) => r.rank <= 20).map(toPublicRow),
     me,
+    seasonPass: scope === 'gaming' && seasonId ? { required: true, owned: !!pass, eligibleFrom: pass?.eligibleFrom || null } : null,
   });
 }
 

@@ -216,15 +216,17 @@ async function grantOnChainPurchaseForPlayer(
   paymentCurrency,
   signature,
   paymentWalletAddress,
+  paidPrice = {},
 ) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
   }
 
-  const item = SHOP_CATALOG[itemId];
-  if (item === undefined) {
+  const configuredItem = SHOP_CATALOG[itemId];
+  if (configuredItem === undefined) {
     throw new Error('ITEM NOT FOUND');
   }
+  const item = { ...configuredItem, ...paidPrice };
 
   const account = await ensureAccountForPlayer(player);
   if (typeof item.fuel === 'number' && item.fuel > 0) {
@@ -353,8 +355,8 @@ async function appendPurchaseLedgerEntries(
   const entries = [
     {
       ...base,
-      currency: paymentCurrency === 'sol' ? 'sol' : 'token',
-      amount: paymentCurrency === 'sol' ? -item.solPrice : -item.price,
+      currency: paymentCurrency === 'sol' ? 'sol' : paymentCurrency === 'skr' ? 'skr' : 'token',
+      amount: paymentCurrency === 'sol' ? -item.solPrice : paymentCurrency === 'skr' ? -item.skrPrice : -item.price,
     },
   ];
 

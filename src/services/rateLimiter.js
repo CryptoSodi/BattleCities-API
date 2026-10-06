@@ -19,6 +19,9 @@ const LIMITS = {
   'shop-purchase-verify': { max: 20, windowMs: 60 * 1000 },
   'cherry-embed-token': { max: 20, windowMs: 60 * 1000 },
   'x-oauth-start': { max: 10, windowMs: 60 * 1000 },
+  'native-oauth-start': { max: 10, windowMs: 60 * 1000 },
+  'skr-swap-quote': { max: 20, windowMs: 60 * 1000 },
+  'skr-swap-execute': { max: 20, windowMs: 60 * 1000 },
   'x-oauth-callback': { max: 10, windowMs: 60 * 1000 },
   // A user-resource lookup costs X API credits. It is only reachable through
   // an explicit OAuth refresh, and this cap prevents repeated clicks from

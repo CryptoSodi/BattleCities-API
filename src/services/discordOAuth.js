@@ -26,7 +26,7 @@ function isConfigured() {
   );
 }
 
-function createAuthorizationUrl(origin, playerId, sessionId) {
+function createAuthorizationUrl(origin, playerId, sessionId, native = null) {
   const config = requireConfig();
   const redirectUri = getRedirectUri(origin);
   const params = new URLSearchParams({
@@ -34,7 +34,7 @@ function createAuthorizationUrl(origin, playerId, sessionId) {
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'identify guilds.members.read',
-    state: createState({ playerId, sessionId, redirectUri }),
+    state: native?.state || createState({ playerId, sessionId, redirectUri }),
   });
   return `${AUTHORIZATION_URL}?${params.toString()}`;
 }
@@ -196,6 +196,13 @@ function base64UrlDecode(value) {
 }
 
 module.exports = {
+  async completeNative(code, origin) {
+    if (typeof code !== 'string' || code.length < 1 || code.length > 2048) throw new Error('Invalid Discord authorization code');
+    const accessToken = await exchangeCode(code, getRedirectUri(origin));
+    const profile = await fetchCurrentUser(accessToken);
+    if (!await checkGuildMembership(accessToken)) throw new Error('Join the Battle Cities Discord server before verifying');
+    return profile;
+  },
   CALLBACK_PATH,
   completeVerification,
   createAuthorizationUrl,

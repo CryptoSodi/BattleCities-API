@@ -6,6 +6,8 @@ const sessionIdentity = require('../../../../services/sessionIdentity');
 const sessionStore = require('../../../../stores/sessionStore');
 
 export async function GET(request: Request): Promise<Response> {
+  const native = await require('../../../../services/nativeOAuth').callback('discord', request);
+  if (native) return native;
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');

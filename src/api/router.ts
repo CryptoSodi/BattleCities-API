@@ -1,4 +1,10 @@
 import * as airdropClaim from '../routes/airdrops/claim';
+import * as adminCompetitions from '../routes/admin/competitions';
+import * as adminMatchReviews from '../routes/admin/matchReviews';
+import * as economyCatalog from '../routes/economy/catalog';
+import * as nativeOAuth from '../routes/integrations/nativeOAuth';
+import * as skrSwap from '../routes/trading/swap';
+import * as leaderboardHistory from '../routes/leaderboardHistory';
 import * as airdropEligibility from '../routes/airdrops/eligibility';
 import * as googleAuthCallback from '../routes/auth/google/callback';
 import * as googleAuthNative from '../routes/auth/google/native';
@@ -96,6 +102,17 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
     OPTIONS: adminTournaments.OPTIONS,
   },
   'airdrops/claim': airdropClaim,
+  'admin/competitions': adminCompetitions,
+  'admin/match-reviews': adminMatchReviews,
+  'economy/catalog': economyCatalog,
+  'seasons/pass': economyCatalog,
+  'integrations/x/oauth/native/start': { POST: nativeOAuth.POST, OPTIONS: nativeOAuth.OPTIONS },
+  'integrations/discord/oauth/native/start': { POST: nativeOAuth.POST, OPTIONS: nativeOAuth.OPTIONS },
+  'integrations/oauth/native/status': { GET: nativeOAuth.GET, OPTIONS: nativeOAuth.OPTIONS },
+  'trading/swap/quote': skrSwap,
+  'trading/swap/execute': skrSwap,
+  'leaderboard/cycles': leaderboardHistory,
+  'leaderboard/payouts': leaderboardHistory,
   'airdrops/eligibility': airdropEligibility,
   'auth/google/callback': googleAuthCallback,
   'auth/google/native': googleAuthNative,

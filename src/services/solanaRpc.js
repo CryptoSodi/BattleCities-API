@@ -4,12 +4,11 @@
 // The swap venue is Raydium, but verification is venue-agnostic: we fetch the
 // confirmed transaction by signature and read what actually moved in/out of
 // the player's wallet, so any DEX route (Raydium, aggregators) verifies the
-// same way. The token launches on TESTNET first, so the default RPC endpoint
-// is testnet; point BATTLECITY_SOLANA_RPC_URL at mainnet later.
+// same way. Payments and SKR swaps use mainnet by default.
 
 function getRpcUrl() {
   return (
-    process.env.BATTLECITY_SOLANA_RPC_URL || 'https://api.testnet.solana.com'
+    process.env.BATTLECITY_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
   );
 }
 

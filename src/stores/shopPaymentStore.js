@@ -88,4 +88,13 @@ function withFileLock(operation) {
   return next;
 }
 
-module.exports = { consumePayment };
+async function readPayment(quoteId) {
+  if (storageConfig.hasDatabaseConfig()) {
+    await database.assertMigrationsApplied();
+    const result = await database.getPool().query(`SELECT * FROM ${TABLE_NAME} WHERE quote_id = $1`, [quoteId]);
+    const r = result.rows[0];
+    return r ? { signature: r.signature, quoteId: r.quote_id, playerId: r.player_id } : null;
+  }
+  return (await readRecords()).find((r) => r.quoteId === quoteId) || null;
+}
+module.exports = { consumePayment, readPayment };

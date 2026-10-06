@@ -20,6 +20,11 @@ const {
 const economyStore = require('../stores/economyStore');
 const shopPaymentStore = require('../stores/shopPaymentStore');
 const solanaRpc = require('./solanaRpc');
+const skrToken = require('./skrToken');
+const competitionConfig = require('./competitionConfig');
+const competitionStore = require('../stores/competitionStore');
+const seasonStore = require('../stores/seasonStore');
+const ledgerStore = require('../stores/ledgerStore');
 
 const NETWORK = 'mainnet-beta';
 const TOKEN_MINT = 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz';
@@ -76,23 +81,39 @@ async function createQuote(player, input) {
   const config = getConfig();
   assertConfigured(config);
   const itemId = String(input?.itemId || '');
-  const currency = input?.currency === 'sol' ? 'sol' : 'token';
-  const item = economyStore.getShopCatalogItem(itemId);
+  const currency = input?.currency || 'token';
+  if (!['sol', 'token', 'skr'].includes(currency)) throw new Error('Invalid payment currency.');
+  const settings = await competitionConfig.get();
+  let season = null;
+  let item = economyStore.getShopCatalogItem(itemId);
+  if (itemId === 'season-pass') {
+    season = await seasonStore.getCurrentSeason();
+    if (!settings.seasonPass.enabled) throw new Error('Season pass sales are disabled.');
+    if (currency === 'token') throw new Error('Season passes support SKR or SOL.');
+    if (input.seasonId && input.seasonId !== season.id) throw new Error('Season has changed; refresh the shop.');
+    if (await competitionStore.getPass(player.id, season.id)) throw new Error('Season pass already owned.');
+    if (Date.parse(season.endsAt) - Date.now() < QUOTE_TTL_MS + MAX_CLOCK_SKEW_MS) throw new Error('Season pass checkout has closed for this season.');
+    item = { ...settings.seasonPass };
+  } else if (item) item.skrPrice = settings.shopSkrPrices[itemId] ?? null;
   if (item === null) throw new Error('ITEM NOT FOUND');
+  const token = currency === 'skr' ? skrToken.requireConfig() : {
+    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
+  };
+  const tokenMint = new PublicKey(token.mint), tokenProgram = new PublicKey(token.programId);
 
   let wallet;
   try {
-    wallet = new PublicKey(String(input?.walletAddress || ''));
+    wallet = new PublicKey(String(input?.walletAddress || player.walletAddress || ''));
   } catch {
     throw new Error('Invalid wallet address.');
   }
+  if (player.provider !== 'wallet' || wallet.toBase58() !== player.walletAddress) throw new Error('Payment wallet must match the authenticated wallet.');
 
-  const amountAtomic = currency === 'sol'
-    ? BigInt(Math.round(item.solPrice * 1_000_000_000))
-    : BigInt(item.price) * 1_000_000n;
+  const amountAtomic = currency === 'sol' ? skrToken.atomic(item.solPrice, 9)
+    : currency === 'skr' ? skrToken.atomic(item.skrPrice, token.decimals) : skrToken.atomic(item.price, TOKEN_DECIMALS);
   const issuedAt = Date.now();
   const payload = {
-    v: 1,
+    v: 2,
     id: crypto.randomUUID(),
     playerId: player.id,
     walletAddress: wallet.toBase58(),
@@ -100,13 +121,17 @@ async function createQuote(player, input) {
     currency,
     amountAtomic: amountAtomic.toString(),
     treasury: config.treasury.toBase58(),
-    tokenMint: config.tokenMint.toBase58(),
+    tokenMint: token.mint,
+    tokenProgram: token.programId,
+    tokenDecimals: token.decimals,
+    seasonId: season?.id || null,
     network: NETWORK,
     issuedAt,
     expiresAt: issuedAt + QUOTE_TTL_MS,
   };
   const quoteToken = signPayload(payload, config.quoteSecret);
   const connection = new Connection(config.rpcUrl, 'confirmed');
+  if (currency === 'skr') await skrToken.validateMint(connection, token);
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({ feePayer: wallet, recentBlockhash: blockhash });
   transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }));
@@ -115,40 +140,40 @@ async function createQuote(player, input) {
     transaction.add(SystemProgram.transfer({
       fromPubkey: wallet,
       toPubkey: config.treasury,
-      lamports: Number(amountAtomic),
+      lamports: amountAtomic,
     }));
   } else {
     const source = getAssociatedTokenAddressSync(
-      config.tokenMint,
+      tokenMint,
       wallet,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      tokenProgram,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     );
     const destination = getAssociatedTokenAddressSync(
-      config.tokenMint,
+      tokenMint,
       config.treasury,
       false,
-      TOKEN_2022_PROGRAM_ID,
+      tokenProgram,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     );
     transaction.add(createAssociatedTokenAccountIdempotentInstruction(
       wallet,
       destination,
       config.treasury,
-      config.tokenMint,
-      TOKEN_2022_PROGRAM_ID,
+      tokenMint,
+      tokenProgram,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     ));
     transaction.add(createTransferCheckedInstruction(
       source,
-      config.tokenMint,
+      tokenMint,
       destination,
       wallet,
       amountAtomic,
-      TOKEN_DECIMALS,
+      token.decimals,
       [],
-      TOKEN_2022_PROGRAM_ID,
+      tokenProgram,
     ));
   }
 
@@ -169,7 +194,7 @@ async function createQuote(player, input) {
   if (simulation.value.err) {
     throw new Error(currency === 'sol'
       ? 'The payment could not be prepared. Check your SOL balance.'
-      : 'The payment could not be prepared. Check your BATC and SOL balances.');
+      : `The payment could not be prepared. Check your ${currency === 'skr' ? 'SKR' : 'BATC'} and SOL balances.`);
   }
 
   return {
@@ -184,7 +209,10 @@ async function createQuote(player, input) {
     network: NETWORK,
     rpcUrl: PUBLIC_RPC_URL,
     treasury: config.treasury.toBase58(),
-    tokenMint: config.tokenMint.toBase58(),
+    tokenMint: token.mint,
+    currency,
+    amountAtomic: amountAtomic.toString(),
+    seasonId: season?.id || null,
   };
 }
 
@@ -212,11 +240,20 @@ async function getWalletBalances(walletAddress) {
     const amount = account.account.data.parsed?.info?.tokenAmount?.amount;
     return total + (typeof amount === 'string' ? Number(amount) : 0);
   }, 0);
+  const skr = skrToken.config();
+  let skrAmount = null;
+  if (skr) {
+    const accounts = await connection.getParsedTokenAccountsByOwner(wallet, { mint: new PublicKey(skr.mint) });
+    skrAmount = accounts.value.reduce((total, a) => total + BigInt(a.account.data.parsed?.info?.tokenAmount?.amount || '0'), 0n);
+  }
 
   return {
     walletAddress: wallet.toBase58(),
     solBalance: lamports / LAMPORTS_PER_SOL,
     tokenBalance: tokenAmount / 10 ** TOKEN_DECIMALS,
+    skrBalance: skrAmount === null ? null : formatAtomic(skrAmount, skr.decimals),
+    skrBalanceAtomic: skrAmount?.toString() ?? null,
+    skrMint: skr?.mint || null,
   };
 }
 
@@ -229,10 +266,21 @@ async function verifyPurchase(player, input) {
   }
   const quoteToken = String(input?.quoteToken || '');
   const quote = verifyQuoteToken(quoteToken, config.quoteSecret);
-  validateQuote(quote, config, player);
+  const existing = await shopPaymentStore.readPayment(quote.id);
+  if (existing) {
+    if (existing.playerId !== player.id || existing.signature !== signature || quote.playerId !== player.id) throw new Error('Payment already used.');
+    return { ok: true, statusText: 'PURCHASE ALREADY VERIFIED', txHash: signature,
+      account: economyStore.toPublicAccount(await economyStore.readAccount(player.id)),
+      seasonPass: quote.seasonId ? await competitionStore.getPass(player.id, quote.seasonId) : null };
+  }
+  const token = quote.currency === 'skr' ? skrToken.requireConfig() : {
+    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
+  };
+  const paymentConfig = { ...config, tokenMint: new PublicKey(token.mint), tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals };
+  validateQuote(quote, paymentConfig, player);
   const transaction = await solanaRpc.getTransaction(signature, config.rpcUrl);
   if (transaction === null) throw new Error('Transaction is not confirmed on Solana mainnet yet.');
-  verifyPayment(transaction, quote, config);
+  verifyPayment(transaction, quote, paymentConfig);
   const confirmedAt = transaction.blockTime
     ? new Date(transaction.blockTime * 1000).toISOString()
     : new Date().toISOString();
@@ -248,12 +296,23 @@ async function verifyPurchase(player, input) {
     confirmedAt,
   }, async (inserted) => {
     if (inserted) {
+      if (quote.itemId === 'season-pass') {
+        const season = await seasonStore.readSeason(quote.seasonId);
+        if (!season) throw new Error('Season not found.');
+        await competitionStore.grantPass(player.id, season, signature, confirmedAt);
+        await ledgerStore.appendEntries({ playerId: player.id, walletAddress: quote.walletAddress,
+          currency: quote.currency, amount: -Number(formatAtomic(BigInt(quote.amountAtomic), quote.currency === 'sol' ? 9 : token.decimals)),
+          reason: 'season-pass', sourceType: 'season-pass', sourceId: signature });
+        return economyStore.toPublicAccount(await economyStore.ensureAccountForPlayer(player));
+      }
       return economyStore.grantOnChainPurchaseForPlayer(
         player,
         quote.itemId,
         quote.currency,
         signature,
         quote.walletAddress,
+        { [quote.currency === 'sol' ? 'solPrice' : quote.currency === 'skr' ? 'skrPrice' : 'price']:
+          Number(formatAtomic(BigInt(quote.amountAtomic), quote.currency === 'sol' ? 9 : token.decimals)) },
       );
     }
     const account = await economyStore.readAccount(player.id);
@@ -265,17 +324,19 @@ async function verifyPurchase(player, input) {
     statusText: result.inserted ? `BOUGHT ${quote.itemId.toUpperCase()}` : 'PURCHASE ALREADY VERIFIED',
     txHash: signature,
     account: result.account,
+    seasonPass: quote.seasonId ? await competitionStore.getPass(player.id, quote.seasonId) : null,
   };
 }
 
 function validateQuote(quote, config, player) {
-  if (quote.v !== 1
+  if (![1, 2].includes(quote.v)
     || quote.playerId !== player.id
     || quote.network !== NETWORK
     || quote.treasury !== config.treasury.toBase58()
     || quote.tokenMint !== config.tokenMint.toBase58()
-    || !economyStore.getShopCatalogItem(quote.itemId)
-    || (quote.currency !== 'sol' && quote.currency !== 'token')
+    || (!economyStore.getShopCatalogItem(quote.itemId) && !(quote.v === 2 && quote.itemId === 'season-pass' && /^season-\d+$/.test(quote.seasonId)))
+    || !['sol', 'token', 'skr'].includes(quote.currency)
+    || (quote.itemId === 'season-pass' && quote.currency === 'token')
     || !/^\d+$/.test(String(quote.amountAtomic || ''))
     || !Number.isFinite(quote.issuedAt)
     || !Number.isFinite(quote.expiresAt)
@@ -284,10 +345,20 @@ function validateQuote(quote, config, player) {
     || Date.now() > quote.expiresAt + MAX_CLOCK_SKEW_MS) {
     throw new Error('Quote does not match the mainnet shop.');
   }
+  if (quote.v === 2 && (quote.tokenProgram !== config.tokenProgramId.toBase58() || quote.tokenDecimals !== config.tokenDecimals)) {
+    throw new Error('Quote token does not match the shop.');
+  }
+  if (quote.walletAddress !== player.walletAddress) throw new Error('Payment wallet does not match the authenticated wallet.');
   try {
     if (new PublicKey(quote.walletAddress).toBase58() !== quote.walletAddress) throw new Error();
   } catch {
     throw new Error('Quote contains an invalid wallet address.');
+  }
+  // V2 signs an exact server price. An admin price edit must not invalidate
+  // the wallet transaction during its short checkout window.
+  if (quote.v === 2) {
+    if (BigInt(quote.amountAtomic) <= 0n || BigInt(quote.amountAtomic) > 18446744073709551615n) throw new Error('Invalid payment amount.');
+    return;
   }
   const item = economyStore.getShopCatalogItem(quote.itemId);
   const expected = quote.currency === 'sol'
@@ -339,22 +410,24 @@ function verifyPayment(transaction, quote, config) {
 
 function matchesTokenTransfer(instructions, quote, config) {
   const wallet = new PublicKey(quote.walletAddress);
+  const program = config.tokenProgramId || TOKEN_2022_PROGRAM_ID;
+  const decimals = config.tokenDecimals ?? TOKEN_DECIMALS;
   const source = getAssociatedTokenAddressSync(
-    config.tokenMint, wallet, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
+    config.tokenMint, wallet, false, program, ASSOCIATED_TOKEN_PROGRAM_ID,
   ).toBase58();
   const destination = getAssociatedTokenAddressSync(
-    config.tokenMint, config.treasury, false, TOKEN_2022_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
+    config.tokenMint, config.treasury, false, program, ASSOCIATED_TOKEN_PROGRAM_ID,
   ).toBase58();
   return instructions.some((instruction) => {
     const parsed = instruction?.parsed;
     const info = parsed?.info;
-    return instruction?.programId === TOKEN_2022_PROGRAM_ID.toBase58()
+    return instruction?.programId === program.toBase58()
       && parsed?.type === 'transferChecked'
       && info?.source === source
       && info?.destination === destination
       && info?.authority === quote.walletAddress
       && info?.mint === config.tokenMint.toBase58()
-      && Number(info?.tokenAmount?.decimals) === TOKEN_DECIMALS
+      && Number(info?.tokenAmount?.decimals) === decimals
       && BigInt(info?.tokenAmount?.amount || 0) === BigInt(quote.amountAtomic);
   });
 }
@@ -363,6 +436,11 @@ function signPayload(payload, secret) {
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const signature = crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
   return `${encoded}.${signature}`;
+}
+function formatAtomic(amount, decimals) {
+  const whole = amount / 10n ** BigInt(decimals);
+  const fraction = (amount % 10n ** BigInt(decimals)).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 function verifyQuoteToken(token, secret) {

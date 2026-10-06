@@ -130,7 +130,7 @@ async function submitResult(player, season, input) {
 }
 
 // Aggregated Game Points per player, ranked. seasonId null/'' => all-time.
-async function getLeaderboard(seasonId, limit = 20) {
+async function getLeaderboard(seasonId, limit = 20, acceptedOnly = false) {
   const safeLimit = Math.max(
     1,
     Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 20),
@@ -143,9 +143,16 @@ async function getLeaderboard(seasonId, limit = 20) {
     const params = [];
     // Guests are virtual players — never ranked (services/playerPolicy.js).
     let where = `validation_status <> 'rejected' AND provider <> 'guest'`;
+    if (acceptedOnly) where += ` AND validation_status = 'accepted'
+      AND EXISTS (SELECT 1 FROM battlecity_match_prize_reviews review
+        WHERE review.result_id = ${TABLE_NAME}.id AND review.decision = 'accepted')`;
     if (scopeSeasonId !== null) {
       params.push(scopeSeasonId);
-      where += ` AND season_id = $${params.length}`;
+      where += ` AND season_id = $${params.length}
+        AND EXISTS (SELECT 1 FROM battlecity_season_passes pass
+          WHERE pass.player_id = ${TABLE_NAME}.player_id AND pass.season_id = $${params.length}
+            AND ${TABLE_NAME}.created_at >= pass.eligible_from
+            AND ${TABLE_NAME}.created_at < pass.expires_at)`;
     }
     params.push(safeLimit);
 
@@ -175,7 +182,7 @@ async function getLeaderboard(seasonId, limit = 20) {
     }));
   }
 
-  const totals = await aggregateFileResults(scopeSeasonId);
+  const totals = await aggregateFileResults(scopeSeasonId, acceptedOnly);
   return totals
     .sort(
       (a, b) =>
@@ -188,7 +195,7 @@ async function getLeaderboard(seasonId, limit = 20) {
 
 // The rewards board is a separate, bounded scoring window. It uses the same
 // server-derived points as seasons and never admits guest or rejected runs.
-async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, playerId = null) {
+async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, playerId = null, acceptedOnly = false) {
   const safeLimit = Math.max(
     1,
     Math.min(MAX_LEADERBOARD_LIMIT, Number(limit) || 10),
@@ -206,6 +213,9 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, pl
     const params = [start.toISOString(), end.toISOString()];
     let where = `validation_status <> 'rejected' AND provider <> 'guest'
       AND created_at >= $1 AND created_at < $2`;
+    if (acceptedOnly) where += ` AND validation_status = 'accepted'
+      AND EXISTS (SELECT 1 FROM battlecity_match_prize_reviews review
+        WHERE review.result_id = ${TABLE_NAME}.id AND review.decision = 'accepted')`;
     if (scopeSeasonId !== null) {
       params.push(scopeSeasonId);
       where += ` AND season_id = $${params.length}`;
@@ -235,7 +245,7 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, pl
     }));
   }
 
-  const totals = await aggregateFileResultsInWindow(scopeSeasonId, start, end);
+  const totals = await aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedOnly);
   return totals
     .sort((a, b) => b.totalPoints - a.totalPoints || (a.playerId < b.playerId ? -1 : 1))
     .map((row, index) => ({ rank: index + 1, ...row }))
@@ -261,7 +271,11 @@ async function getPlayerRank(playerId, seasonId) {
     let where = `validation_status <> 'rejected' AND provider <> 'guest'`;
     if (scopeSeasonId !== null) {
       params.push(scopeSeasonId);
-      where += ` AND season_id = $${params.length}`;
+      where += ` AND season_id = $${params.length}
+        AND EXISTS (SELECT 1 FROM battlecity_season_passes pass
+          WHERE pass.player_id = ${TABLE_NAME}.player_id AND pass.season_id = $${params.length}
+            AND ${TABLE_NAME}.created_at >= pass.eligible_from
+            AND ${TABLE_NAME}.created_at < pass.expires_at)`;
     }
 
     const result = await getPgPool().query(
@@ -465,7 +479,9 @@ async function getPublicPlayerReplay(playerId, resultId) {
   return replays.length > 0 ? replays : [source.replay_json];
 }
 
-async function aggregateFileResults(scopeSeasonId) {
+async function aggregateFileResults(scopeSeasonId, acceptedOnly = false) {
+  const passes = scopeSeasonId === null ? null : new Map((await require('./competitionStore').listPasses(scopeSeasonId))
+    .map((pass) => [pass.playerId, pass]));
   let files;
   try {
     files = await fs.readdir(getDataDir());
@@ -494,12 +510,18 @@ async function aggregateFileResults(scopeSeasonId) {
     if (result.validationStatus === 'rejected') {
       continue;
     }
+    if (acceptedOnly && (result.validationStatus !== 'accepted' || result.prizeReview?.decision !== 'accepted')) continue;
     // Guests are virtual players — never ranked (services/playerPolicy.js).
     if (result.provider === 'guest') {
       continue;
     }
     if (scopeSeasonId !== null && result.seasonId !== scopeSeasonId) {
       continue;
+    }
+    if (passes !== null) {
+      const pass = passes.get(result.playerId);
+      const at = Date.parse(result.createdAt);
+      if (!pass || !Number.isFinite(at) || at < Date.parse(pass.eligibleFrom) || at >= Date.parse(pass.expiresAt)) continue;
     }
 
     const existing = byPlayer.get(result.playerId) || {
@@ -517,7 +539,7 @@ async function aggregateFileResults(scopeSeasonId) {
   return Array.from(byPlayer.values());
 }
 
-async function aggregateFileResultsInWindow(scopeSeasonId, start, end) {
+async function aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedOnly = false) {
   const byPlayer = new Map();
   let files;
   try { files = await fs.readdir(getDataDir()); } catch { return []; }
@@ -528,6 +550,7 @@ async function aggregateFileResultsInWindow(scopeSeasonId, start, end) {
     const createdAt = Date.parse(result?.createdAt);
     if (!Number.isFinite(createdAt) || createdAt < start.getTime() || createdAt >= end.getTime()) continue;
     if (result.validationStatus === 'rejected' || result.provider === 'guest') continue;
+    if (acceptedOnly && (result.validationStatus !== 'accepted' || result.prizeReview?.decision !== 'accepted')) continue;
     if (scopeSeasonId !== null && result.seasonId !== scopeSeasonId) continue;
     const row = byPlayer.get(result.playerId) || { playerId: result.playerId, walletAddress: result.walletAddress || null, displayName: result.displayName || 'Player', totalPoints: 0, matches: 0 };
     row.totalPoints += Number(result.gamePoints) || 0;

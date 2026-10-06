@@ -14,9 +14,8 @@ export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
 }
 
-// Records eligible swap volume, idempotent by transaction signature. Runs in
-// mock verification mode until an RPC provider is picked (open decision) —
-// see the note in stores/tradingStore.js.
+// Records confirmed eligible swap volume, idempotent by transaction signature.
+// Mock verification is available only when explicitly enabled in development.
 export async function POST(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);
   if (player === null) {
