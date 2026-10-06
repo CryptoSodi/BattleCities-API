@@ -5,10 +5,7 @@ function loadLocalEnv(filePath) {
   const candidates =
     typeof filePath === 'string'
       ? [filePath]
-      : [
-          path.join(process.cwd(), '.env.local'),
-          path.resolve(process.cwd(), '..', '.env.local'),
-        ];
+      : [path.join(process.cwd(), '.env.local')];
 
   candidates.forEach(loadEnvFile);
 }

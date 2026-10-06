@@ -1,10 +1,23 @@
-# Battle Cities API 0.3.0
+# Battle Cities API 0.3.1
 
 Standalone HTTP API for the current single-player game and command center.
 Node.js 18+; PostgreSQL is required in production. Local JSON storage is for
 development and tests. Admin reporting and replay review require PostgreSQL.
 
-## Run
+## Local development
+
+Run commands from this repository's root. Copy `.env.example` to `.env.local`;
+the example uses local JSON storage and disables automatic reward delivery.
+
+```sh
+npm ci
+npm run build
+npm start
+```
+
+## Production
+
+Configure production environment variables before running these commands:
 
 ```sh
 npm ci
@@ -63,7 +76,10 @@ backfill, reward policy, approval gates and payout worker configuration.
 
 ## Admin
 
-The web command center at `/admin/` uses wallet challenge login. Only the wallet
+The web command center is hosted by the
+[game repository](https://github.com/CryptoSodi/Battle-Cities) at `/admin/` and
+calls this API. This repository contains the admin endpoints. The command center
+uses wallet challenge login. Only the wallet
 allowlist in `src/middleware/admin.ts` can access admin routes. Guest sessions
 and legacy Google sessions cannot authorize an administrator.
 
@@ -92,5 +108,4 @@ Google login, multiplayer matchmaking/results/tournaments, WebRTC signaling,
 broadcaster/headless integration, diagnostic sockets, staking, airdrops,
 quests/campaigns, presale, combat boosts and Cherry token routes are retired.
 Requests to those routes return 404. Old web multiplayer clients must not point
-at this API. Separate legacy game/headless projects outside `api-server` remain
-outside this cleanup.
+at this API. Legacy game/headless projects remain in the game repository.

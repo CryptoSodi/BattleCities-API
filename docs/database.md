@@ -12,12 +12,12 @@ database URL.
 | Players and sessions | `battlecity_players`, `battlecity_sessions`, `battlecity_wallet_challenges` | `server-data/players`, `server-data/sessions`, `server-data/wallet-challenges` |
 | Economy | `battlecity_economy_accounts`, `battlecity_ledger_entries` | `server-data/economy`, `server-data/ledger` |
 | Matches and seasons | `battlecity_match_results`, `battlecity_seasons`, `battlecity_leaderboard_rows` | `server-data/match-results`, `server-data/seasons`, `server-data/leaderboard-snapshots` |
-| Replays | `battlecity_replays` plus Vercel Blob payloads | `server-data/replays` |
-| Events and rewards | `battlecity_quest_progress`, `battlecity_event_currency_balances`, `battlecity_airdrop_state`, `battlecity_staking_state` | `server-data/events`, `server-data/airdrops`, `server-data/staking` |
+| Replays | `battlecity_replays` (metadata and payloads) | `server-data/replays` |
 | Trading | `battlecity_trading_volume` | `server-data/trading` |
-| WebRTC registry | `battlecity_webrtc_signals`, `battlecity_webrtc_observers` | `server-data/webrtc-signals` |
 
 The migration runner additionally owns `battlecity_schema_migrations`.
+Historical migrations preserve retired system tables; the active API does not
+expose events, staking, airdrops or WebRTC.
 
 ## Environment variables
 
@@ -31,17 +31,15 @@ The migration runner additionally owns `battlecity_schema_migrations`.
 - `BATTLECITY_DATABASE_CONNECT_TIMEOUT_MS` defaults to `5000`.
 - `BATTLECITY_DATABASE_IDLE_TIMEOUT_MS` defaults to `30000`.
 - `BATTLECITY_TEST_DATABASE_URL` enables the optional live integration test.
-- `BLOB_READ_WRITE_TOKEN` is required for production replay payload storage;
-  replay routes never fall back to local files in production.
 
 ## Deployment procedure
 
 1. Back up the target database.
 2. Set `DATABASE_URL` and any TLS/pool variables in the API environment.
-3. Run `npm --prefix api-server run db:migrate` once for the release.
-4. Run `npm --prefix api-server run db:check`.
+3. Run `npm run db:migrate` from the repository root once for the release.
+4. Run `npm run db:check`.
 5. Deploy the API and verify `GET /api/ready` returns HTTP 200 with
-   `storage: "postgres"` and migration `002_constraints`.
+   `storage: "postgres"` and migration `031_guest_wallet_auth`.
 
 Migrations run once, in filename order, inside transactions. Stores verify the
 latest migration before using PostgreSQL and never run schema DDL during a

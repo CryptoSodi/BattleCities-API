@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
-const base = '../dist/api-server/src/';
+const base = '../dist/src/';
 const admin = require(base + 'routes/admin/competitions');
 const reviews = require(base + 'routes/admin/matchReviews');
 const catalog = require(base + 'routes/economy/catalog');

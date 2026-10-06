@@ -1,0 +1,25 @@
+node_modules/
+dist/
+server-data/
+coverage/
+*.log
+
+# Local configuration, credentials and database files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*keypair*.json
+*service-account*.json
+*.db
+*.sqlite
+*.sqlite3
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

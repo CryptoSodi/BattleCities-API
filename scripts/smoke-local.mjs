@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const serverEntry = fileURLToPath(
-  new URL('../dist/api-server/src/index.js', import.meta.url),
+  new URL('../dist/src/index.js', import.meta.url),
 );
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'battlecities-smoke-'));

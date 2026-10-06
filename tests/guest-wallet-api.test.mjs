@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
-const app = require('../dist/api-server/src/app').default;
+const app = require('../dist/src/app').default;
 const bs58 = require('bs58').default;
 let root;
 beforeEach(async () => {

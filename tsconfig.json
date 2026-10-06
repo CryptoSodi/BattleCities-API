@@ -7,7 +7,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "dist",
-    "rootDir": "..",
+    "rootDir": ".",
     "skipLibCheck": true,
     "target": "es2020"
   },
