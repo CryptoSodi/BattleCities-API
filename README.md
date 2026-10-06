@@ -1,4 +1,4 @@
-# Battle Cities API 0.3.1
+# Battle Cities API 0.3.2
 
 Standalone HTTP API for the current single-player game and command center.
 Node.js 18+; PostgreSQL is required in production. Local JSON storage is for
@@ -92,6 +92,8 @@ Settings/review APIs are available; their dashboard forms are future work.
 Firebase push delivery uses a service account (`FIREBASE_SERVICE_ACCOUNT_JSON`
 or `FIREBASE_SERVICE_ACCOUNT_BASE64`) independently of player authentication.
 No Google player login SDK or OAuth routes remain.
+The native Unity Android contract, targeting, configuration and delivery checks
+are documented in [Firebase notifications](docs/firebase-notifications.md).
 
 ## Migration and retired systems
 

@@ -1,4 +1,4 @@
-# Competitions and native client API (0.3.1)
+# Competitions and native client API (0.3.2)
 
 All paths below are relative to `/api`. Authenticated calls use the existing
 `battlecity_session` cookie. Admin calls use the existing admin allowlist.

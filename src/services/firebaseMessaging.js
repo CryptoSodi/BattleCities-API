@@ -1,80 +1,96 @@
 const crypto = require('node:crypto');
+const { normalizeNotification, isValidToken } = require('./notificationPayload');
 
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
+const PROJECT_ID = 'battle-cities-84acd';
+const ANDROID_PACKAGE = 'com.battlecities.solanaconsole';
 
 let accessToken = null;
 let tokenRequest = null;
 let serviceAccount = null;
+let credentialFingerprint = null;
 
 async function sendToToken(token, payload) {
-  if (typeof token !== 'string' || token.length === 0) {
+  if (!isValidToken(token)) {
     throw new Error('A Firebase device token is required');
   }
 
+  const data = normalizeNotification(payload);
   const credentials = getServiceAccount();
-  const bearer = await getAccessToken(credentials);
-  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${credentials.project_id}/messages:send`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
-    signal: AbortSignal.timeout(15000),
-    body: JSON.stringify({
-      message: {
-        token,
-        data: {
-          title: normalizeText(payload.title, 'Battle Cities'),
-          body: normalizeText(payload.body, 'You have a new update.'),
-          route: normalizeText(payload.route, '/'),
-          type: normalizeText(payload.type, 'announcement'),
-          imageUrl: normalizeText(payload.imageUrl, ''),
-          externalUrl: normalizeText(payload.externalUrl, ''),
-          actionLabel: normalizeText(payload.actionLabel, ''),
-        },
-        android: {
-          priority: 'high',
-          notification: {
-            channel_id: 'battle-cities-notifications',
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const bearer = await getAccessToken(credentials);
+    let response;
+    try {
+      response = await fetch(`https://fcm.googleapis.com/v1/projects/${PROJECT_ID}/messages:send`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          message: {
+            token,
+            data,
+            android: {
+              priority: 'HIGH',
+              restricted_package_name: ANDROID_PACKAGE,
+            },
           },
-        },
-      },
-    }),
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    const error = new Error('Firebase messaging request failed');
-    error.response = { data: body, status: response.status };
-    if (response.status === 401) accessToken = null;
+        }),
+      });
+    } catch {
+      throw messagingError('Firebase messaging request failed', 'FCM_NETWORK_ERROR');
+    }
+    const body = await response.json().catch(() => null);
+    if (response.ok) return body;
+    if (response.status === 401 && attempt === 0) {
+      if (accessToken?.value === bearer) accessToken = null;
+      continue;
+    }
+    const details = Array.isArray(body?.error?.details) ? body.error.details : [];
+    const fcmCode = details.find((detail) => detail?.['@type'] === 'type.googleapis.com/google.firebase.fcm.v1.FcmError')?.errorCode;
+    const tokenViolation = details.some((detail) => detail?.['@type'] === 'type.googleapis.com/google.rpc.BadRequest'
+      && detail.fieldViolations?.some((violation) => violation.field === 'message.token'));
+    const explicitlyInvalidToken = fcmCode === 'INVALID_ARGUMENT'
+      && /registration token/i.test(String(body?.error?.message || ''))
+      && /invalid|not.*valid/i.test(String(body?.error?.message || ''));
+    const error = messagingError('Firebase messaging request failed', 'FCM_SEND_FAILED');
+    error.status = response.status;
+    error.invalidToken = fcmCode === 'UNREGISTERED'
+      || (response.status === 400 && (tokenViolation || explicitlyInvalidToken));
+    // Provider bodies may echo device tokens or submitted data. Keep them out of errors/logs.
     throw error;
   }
-  return body;
 }
 
 function isConfigured() {
-  return getServiceAccountValue() !== '';
+  try { getServiceAccount(); return true; } catch { return false; }
 }
 
 function getServiceAccount() {
-  if (serviceAccount !== null) {
+  const value = getServiceAccountValue();
+  const fingerprint = crypto.createHash('sha256').update(value).digest('hex');
+  if (serviceAccount !== null && fingerprint === credentialFingerprint) {
     return serviceAccount;
   }
-  if (!isConfigured()) {
-    throw new Error('Firebase messaging is not configured');
+  if (!value) {
+    throw messagingError('Firebase messaging is not configured', 'FIREBASE_NOT_CONFIGURED');
   }
 
   try {
-    const parsed = JSON.parse(getServiceAccountValue());
+    const parsed = JSON.parse(value);
     if (
-      typeof parsed?.project_id !== 'string' ||
-      typeof parsed?.client_email !== 'string' ||
-      typeof parsed?.private_key !== 'string'
+      parsed?.project_id !== PROJECT_ID ||
+      typeof parsed?.client_email !== 'string' || !parsed.client_email.trim() ||
+      typeof parsed?.private_key !== 'string' ||
+      crypto.createPrivateKey(parsed.private_key).asymmetricKeyType !== 'rsa'
     ) {
-      throw new Error('Firebase service account is incomplete');
+      throw new Error();
     }
     serviceAccount = parsed;
+    credentialFingerprint = fingerprint;
+    accessToken = null;
     return serviceAccount;
-  } catch (error) {
-    throw new Error(
-      `Firebase service account is invalid: ${error instanceof Error ? error.message : 'unknown error'}`,
-    );
+  } catch {
+    throw messagingError('Firebase credentials must be a valid service account for battle-cities-84acd', 'FIREBASE_NOT_CONFIGURED');
   }
 }
 
@@ -111,14 +127,20 @@ async function getAccessToken(credentials) {
     accessToken = { value: body.access_token, expiresAt: Date.now() + Number(body.expires_in) * 1000 };
     return accessToken.value;
   })();
-  try { return await tokenRequest; } finally { tokenRequest = null; }
+  try { return await tokenRequest; }
+  catch { throw messagingError('Firebase service-account authentication failed', 'FIREBASE_AUTH_FAILED'); }
+  finally { tokenRequest = null; }
 }
 
-function normalizeText(value, fallback) {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
+function messagingError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 module.exports = {
   isConfigured,
   sendToToken,
+  PROJECT_ID,
+  ANDROID_PACKAGE,
 };

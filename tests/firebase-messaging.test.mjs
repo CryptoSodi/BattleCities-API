@@ -5,7 +5,7 @@ import test from 'node:test';
 const require = createRequire(import.meta.url);
 test('Firebase push keeps service-account JWT authentication and reuses its token', async (t) => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-  process.env.FIREBASE_SERVICE_ACCOUNT_JSON = JSON.stringify({ project_id: 'test-project', client_email: 'service@example.test',
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON = JSON.stringify({ project_id: 'battle-cities-84acd', client_email: 'service@example.test',
     private_key: privateKey.export({ format: 'pem', type: 'pkcs8' }), private_key_id: 'test-key' });
   delete process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
   let exchanges = 0; let sends = 0;
@@ -21,12 +21,17 @@ test('Firebase push keeps service-account JWT authentication and reuses its toke
       assert.equal(crypto.verify('RSA-SHA256', Buffer.from(`${header}.${claims}`), publicKey, Buffer.from(signature, 'base64url')), true);
       return Response.json({ access_token: 'test-access', expires_in: 3600 });
     }
-    sends++; assert.equal(url, 'https://fcm.googleapis.com/v1/projects/test-project/messages:send');
+    sends++; assert.equal(url, 'https://fcm.googleapis.com/v1/projects/battle-cities-84acd/messages:send');
     assert.equal(init.headers.authorization, 'Bearer test-access');
-    assert.equal(JSON.parse(init.body).message.token, 'test-device');
-    return Response.json({ name: 'projects/test-project/messages/one' });
+    const { message } = JSON.parse(init.body);
+    assert.equal(message.token, 'test-device-token-1234567890');
+    assert.deepEqual(message.data, { title: 'Title', body: 'Body', route: 'home', type: 'announcement' });
+    assert.equal(message.notification, undefined);
+    assert.deepEqual(message.android, { priority: 'HIGH', restricted_package_name: 'com.battlecities.solanaconsole' });
+    return Response.json({ name: 'projects/battle-cities-84acd/messages/one' });
   });
   const messaging = require('../src/services/firebaseMessaging');
-  await Promise.all([messaging.sendToToken('test-device', { title: 'Title' }), messaging.sendToToken('test-device', { title: 'Title' })]);
+  await Promise.all([messaging.sendToToken('test-device-token-1234567890', { title: 'Title', body: 'Body' }),
+    messaging.sendToToken('test-device-token-1234567890', { title: 'Title', body: 'Body' })]);
   assert.equal(exchanges, 1); assert.equal(sends, 2);
 });

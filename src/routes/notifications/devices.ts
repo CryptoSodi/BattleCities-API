@@ -7,6 +7,7 @@ import {
 } from '../_helpers';
 
 const pushDeviceStore = require('../../stores/pushDeviceStore');
+const { isValidToken } = require('../../services/notificationPayload');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -39,10 +40,6 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   return createJsonResponse(request, { ok: true }, 201);
-}
-
-function isValidToken(value: unknown): value is string {
-  return typeof value === 'string' && value.length >= 20 && value.length <= 4096;
 }
 
 function isPermission(value: unknown): value is string {
