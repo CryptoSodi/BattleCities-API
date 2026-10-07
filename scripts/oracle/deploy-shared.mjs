@@ -8,13 +8,14 @@ export function parseRequest(command) {
   return { action: 'deploy', commit: match[1], checksum: match[2] };
 }
 
-export function assertMigrationState(applied, previousFiles, nextFiles) {
+export function assertMigrationState(applied, previousFiles, nextFiles, approved = {}) {
   const versions = [...applied].sort();
   if (JSON.stringify(versions) !== JSON.stringify(Object.keys(nextFiles).sort())) {
     throw new Error('Database migrations require a separate reviewed rollout; production remains unchanged.');
   }
   for (const version of versions) {
-    if (!previousFiles[version] || previousFiles[version] !== nextFiles[version]) {
+    const expected = approved[version] || previousFiles[version];
+    if (!expected || expected !== nextFiles[version]) {
       throw new Error('An applied migration was changed; production remains unchanged.');
     }
   }

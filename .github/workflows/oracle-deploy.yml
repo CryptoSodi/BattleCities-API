@@ -44,7 +44,9 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Migrate the isolated CI database
-        run: npm run db:migrate
+        run: |
+          node scripts/bootstrap-test-database.mjs
+          npm run db:migrate
         env:
           NODE_ENV: test
           DATABASE_URL: postgresql://postgres:ci-only-password@127.0.0.1:5432/battlecities_test

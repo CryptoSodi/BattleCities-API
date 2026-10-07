@@ -59,9 +59,21 @@ function fingerprints(database) {
 }
 async function child(command, args, options) {
   await new Promise((resolve, reject) => {
-    const process = spawn(command, args, options);
-    process.once('error', () => reject(new Error('Release validation could not start.')));
-    process.once('exit', (code) => code === 0 ? resolve() : reject(new Error('Release validation failed; inspect the protected validation log on Oracle.')));
+    const task = spawn(command, args, { ...options, detached: true });
+    const deadline = setTimeout(() => {
+      try { process.kill(-task.pid, 'SIGKILL'); } catch { /* The process may already have exited. */ }
+      reject(new Error('Release validation exceeded its time limit; production remains unchanged.'));
+    }, 10 * 60 * 1000);
+    task.once('error', () => { clearTimeout(deadline); reject(new Error('Release validation could not start.')); });
+    task.once('exit', (code) => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error('Release validation failed; inspect the protected validation log on Oracle.')); });
+  });
+}
+async function stopStaging(task) {
+  if (task.exitCode !== null || task.signalCode !== null) return;
+  await new Promise((resolve) => {
+    task.once('exit', resolve);
+    task.kill('SIGTERM');
+    setTimeout(() => { if (task.exitCode === null && task.signalCode === null) task.kill('SIGKILL'); resolve(); }, 10000).unref();
   });
 }
 async function ready(baseUrl, attempts = 40) {
@@ -131,7 +143,14 @@ try {
       if (databaseUrl.hostname !== '127.0.0.1' || databaseUrl.pathname !== '/battlecities') throw new Error('Unexpected production database.');
       const database = 'battlecities';
       const applied = sql(database, 'SELECT version FROM battlecity_schema_migrations ORDER BY version;').split('\n').filter(Boolean);
-      assertMigrationState(applied, migrationFiles(previous), migrationFiles(release));
+      const approvalPath = '/etc/battlecities/api-migration-approvals.json';
+      let approvals = {};
+      if (fs.existsSync(approvalPath)) {
+        const info = fs.lstatSync(approvalPath);
+        if (!info.isFile() || info.uid !== 0 || (info.mode & 0o022) !== 0) throw new Error('Migration approvals must be protected and root-owned.');
+        approvals = JSON.parse(fs.readFileSync(approvalPath, 'utf8'));
+      }
+      assertMigrationState(applied, migrationFiles(previous), migrationFiles(release), approvals);
       checkpoint();
       dump(database, path.join(backup, 'preflight.dump'));
       report('backup-created', { backup });
@@ -151,9 +170,9 @@ try {
       const stageEnv = { ...testEnv, NODE_ENV: 'production', DATABASE_URL: validationUrl.toString(), BATTLECITY_STORAGE_MODE: 'postgres', PORT: '3901', BATTLECITY_API_HOST: '127.0.0.1', BATTLECITY_WEB_BASE_URL: 'https://battlecities.com' };
       staging = spawn('/usr/bin/node', ['dist/src/index.js'], { ...buildOptions, env: stageEnv });
       if (!await ready('http://127.0.0.1:3901')) throw new Error('Staging API did not become ready.');
+      if (staging.exitCode !== null || staging.signalCode !== null) throw new Error('Staging process exited; production remains unchanged.');
       if (JSON.stringify(fingerprints(clone)) !== JSON.stringify(before)) throw new Error('Validation changed existing database records; production remains unchanged.');
-      staging.kill('SIGTERM');
-      await new Promise((resolve) => staging.once('exit', resolve));
+      await stopStaging(staging);
       staging = null;
       checkpoint();
       run('/usr/bin/chown', ['-R', 'root:root', release]);
@@ -175,7 +194,7 @@ try {
   report('failed', { reason: error.message, ...(backup ? { backup } : {}) });
   process.exitCode = 1;
 } finally {
-  if (staging && staging.exitCode === null) { staging.kill('SIGTERM'); await new Promise((resolve) => staging.once('exit', resolve)); }
+  if (staging) await stopStaging(staging);
   if (clone) {
     try { safeName(clone); run('/usr/bin/sudo', ['-n', '-u', 'postgres', '/usr/bin/dropdb', '--if-exists', '--force', clone]); }
     catch { report('cleanup-required', { database: clone }); }

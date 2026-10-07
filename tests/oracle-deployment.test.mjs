@@ -18,6 +18,9 @@ test('automatic deployment blocks pending, removed and rewritten migrations', ()
   assert.throws(() => assertMigrationState(Object.keys(files), files, { ...files, '032_destructive_change': 'new' }), /separate reviewed rollout/);
   assert.throws(() => assertMigrationState(Object.keys(files), files, { '031_guest_wallet_auth': 'unchanged' }), /separate reviewed rollout/);
   assert.throws(() => assertMigrationState(Object.keys(files), files, { ...files, '001_initial': 'rewritten' }), /applied migration was changed/);
+  const next = { ...files, '032_reviewed_change': 'reviewed-hash' };
+  assert.doesNotThrow(() => assertMigrationState(Object.keys(next), files, next, { '032_reviewed_change': 'reviewed-hash' }));
+  assert.throws(() => assertMigrationState(Object.keys(next), files, next, { '032_reviewed_change': 'different-hash' }), /applied migration was changed/);
 });
 
 async function fixture(callback) {

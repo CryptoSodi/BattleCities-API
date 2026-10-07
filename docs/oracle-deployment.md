@@ -6,7 +6,7 @@ Monitor runs at https://github.com/CryptoSodi/BattleCities-API/actions/workflows
 
 ## Deployment sequence
 
-1. GitHub Actions installs locked dependencies, migrates an isolated PostgreSQL 16 CI database, builds the API, runs the complete test suite including PostgreSQL integration, and runs the HTTP smoke test.
+1. GitHub Actions installs locked dependencies, initializes an isolated PostgreSQL 16 CI database from a schema-only baseline, applies later migrations, builds the API, runs the complete test suite including PostgreSQL integration, and runs the HTTP smoke test.
 2. Only the latest `main` commit proceeds to deployment. Deployments are serialized and active runs are allowed to finish.
 3. GitHub exports a Git archive of that exact commit and uploads it through a dedicated, restricted SSH connection. The server verifies the archive checksum and commit metadata. Archive paths cannot escape the release directory; symlinks, hard links and special files are rejected.
 4. Oracle builds the release using an unprivileged build account. Builds do not receive production credentials.
@@ -21,7 +21,7 @@ The application is stopped only for the final service restart; building, restori
 
 Automatic deployment **does not modify the production schema**. Every migration recorded in production must still exist unchanged in the incoming release. A pending, removed, or rewritten migration fails deployment before the running API is changed.
 
-Schema changes require a separately reviewed database rollout, with a backup and validation against a database copy. After that migration is applied safely, rerun the workflow. This gate also prevents a code rollback from automatically overwriting newer player data with an older database snapshot.
+Schema changes require a separately reviewed database rollout, with a backup and validation against a database copy. After that migration is applied safely, an administrator records its exact SQL SHA-256 under its migration version in the root-owned `/etc/battlecities/api-migration-approvals.json`, then reruns the workflow. The deployment key cannot modify this approval file. This gate also prevents a code rollback from automatically overwriting newer player data with an older database snapshot.
 
 ## Server layout
 
