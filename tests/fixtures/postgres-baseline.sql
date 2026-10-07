@@ -2116,5 +2116,3 @@ ALTER TABLE ONLY public.battlecity_x_repost_tasks
 --
 -- PostgreSQL database dump complete
 --
-
-
