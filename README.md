@@ -111,3 +111,7 @@ broadcaster/headless integration, diagnostic sockets, staking, airdrops,
 quests/campaigns, presale, combat boosts and Cherry token routes are retired.
 Requests to those routes return 404. Old web multiplayer clients must not point
 at this API. Legacy game/headless projects remain in the game repository.
+
+## Oracle deployment
+
+Pushes to main automatically deploy to https://api.battlecities.com after tests, backup restore validation, and staging checks. See [deployment and rollback instructions](docs/oracle-deployment.md).
