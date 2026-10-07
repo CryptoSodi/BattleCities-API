@@ -8,6 +8,7 @@ import app from './app';
 const http = require('http');
 const loadLocalEnv = require('./config/loadLocalEnv');
 const database = require('./database');
+const requestBody = require('./services/requestBody');
 const competitions = require('./services/competitions');
 let stopCompetitionWorker = () => {};
 
@@ -22,12 +23,14 @@ const server = http.createServer(async (incoming: any, outgoing: any) => {
     const response = await app.fetch(request);
     await sendFetchResponse(response, outgoing);
   } catch (error) {
-    console.error('[battlecities-api] request failed', error);
+    const status = (error as any)?.status === 413 ? 413 : (error as any)?.status === 400 ? 400 : 500;
+    if (status === 500) console.error('[battlecities-api] request failed', error);
     if (!outgoing.headersSent) {
-      outgoing.statusCode = 500;
+      outgoing.statusCode = status;
       outgoing.setHeader('content-type', 'application/json');
+      if (status !== 500) outgoing.setHeader('connection', 'close');
     }
-    outgoing.end(JSON.stringify({ error: 'Internal server error' }));
+    outgoing.end(JSON.stringify({ error: status === 413 ? 'Request exceeds size limit' : status === 400 ? 'Invalid request body' : 'Internal server error' }));
   }
 });
 
@@ -85,11 +88,7 @@ function firstForwardedValue(value: string | null): string | null {
 }
 
 async function readBody(incoming: any): Promise<any> {
-  const chunks: any[] = [];
-  for await (const chunk of incoming) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return chunks.length === 0 ? undefined : Buffer.concat(chunks);
+  return requestBody.readNodeBody(incoming);
 }
 
 async function sendFetchResponse(

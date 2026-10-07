@@ -46,6 +46,9 @@ import * as rankings from '../routes/rankings';
 import * as ready from '../routes/ready';
 import * as replays from '../routes/replays';
 import * as replayValidate from '../routes/replays/validate';
+import * as replaySessions from '../routes/replaySessions';
+import * as unityReplays from '../routes/replays/unity';
+import * as adminUnityReplays from '../routes/admin/unityReplays';
 import * as seasonCurrent from '../routes/seasons/current';
 import * as session from '../routes/session';
 import * as tradingTokens from '../routes/trading/tokens';
@@ -67,6 +70,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
   'admin/replays': adminReplays,
+  'admin/replays/unity': adminUnityReplays,
   'admin/session': adminSession,
   'admin/competitions': adminCompetitions,
   'admin/match-reviews': adminMatchReviews,
@@ -108,6 +112,9 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   rankings,
   ready,
   replays,
+  'replay-sessions': replaySessions,
+  'replays/unity': unityReplays,
+  'replays/unity/status': { GET: unityReplays.GET, OPTIONS: unityReplays.OPTIONS },
   'replays/validate': replayValidate,
   'seasons/current': seasonCurrent,
   session,

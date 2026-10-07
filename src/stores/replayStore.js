@@ -619,7 +619,9 @@ function getValidationStatus(record) {
     record.durationTicks === replayMetadata.durationTicks &&
     replayMetadata.matchStatus === 'pending';
 
-  return replayMatchesRecord ? 'verified' : 'rejected';
+  // Metadata agreement is not a simulation proof. Keep consistent client
+  // reports pending until an independent verifier/reviewer checks gameplay.
+  return replayMatchesRecord ? 'pending' : 'rejected';
 }
 
 function normalizeReplay(value) {

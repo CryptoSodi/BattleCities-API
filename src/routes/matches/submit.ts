@@ -9,6 +9,9 @@ const rateLimiter = require('../../services/rateLimiter');
 const seasonStore = require('../../stores/seasonStore');
 const sessionIdentity = require('../../services/sessionIdentity');
 const sessionStore = require('../../stores/sessionStore');
+const unityReplayStore = require('../../stores/unityReplayStore');
+const replayStore = require('../../stores/replayStore');
+const replayFormat = require('../../services/unityReplayFormat');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -48,17 +51,29 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { ok: false, error: 'Only single-player matches are supported' }, 400);
   }
 
-  const result = await database.withTransaction(async () => {
-    const season = await seasonStore.getCurrentSeason();
-    const submitted = await matchResultStore.submitResult(player, season, body);
+  try {
+    const result = await database.withTransaction(async () => {
+      const season = await seasonStore.getCurrentSeason();
+      if (typeof body?.replayId === 'string' && /^urp-/i.test(body.replayId)) {
+        return unityReplayStore.submitBoundMatch(player, season, body);
+      }
+      if (body?.replayId != null) {
+        const replay = await replayStore.readRecordAdmin(body.replayId);
+        if (!replay || replay.playerId !== player.id) throw new replayFormat.ReplayError(404, 'Owned replay not found');
+      }
+      const submitted = await matchResultStore.submitResult(player, season, body);
 
-    return submitted;
-  });
+      return submitted;
+    });
 
-  return json(request, {
-    ok: true,
-    result: matchResultStore.toPublicResult(result),
-  });
+    return json(request, {
+      ok: true,
+      result: matchResultStore.toPublicResult(result),
+    });
+  } catch (error) {
+    if (error instanceof replayFormat.ReplayError) return json(request, { ok: false, error: error.message }, error.status);
+    throw error;
+  }
 }
 
 function json(request: Request, body: any, status = 200): Response {

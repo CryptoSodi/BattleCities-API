@@ -352,11 +352,12 @@ async function getPlayerResults(playerId, limit = 10, offset = 0) {
     await ensureSchema();
     const result = await getPgPool().query(
       `
-        SELECT m.id, m.season_id, m.mode, m.level_number, m.score,
+        SELECT m.id, m.season_id, m.mode, m.level_number, m.score, m.replay_id,
           m.game_points, m.won, m.validation_status, m.created_at,
           (r.id IS NOT NULL) AS replay_available
         FROM ${TABLE_NAME} m
         LEFT JOIN battlecity_replays r ON r.id = m.replay_id AND r.player_id = m.player_id
+          AND r.validation_status <> 'rejected' AND jsonb_typeof(r.replay_json) = 'object'
         WHERE m.player_id = $1 AND m.mode = 'single' AND m.validation_status <> 'rejected'
         ORDER BY m.created_at DESC
         LIMIT $2
@@ -375,6 +376,8 @@ async function getPlayerResults(playerId, limit = 10, offset = 0) {
       won: row.won === true,
       validationStatus: row.validation_status,
       replayAvailable: row.replay_available === true,
+      hasReplay: row.replay_available === true,
+      replayId: row.replay_available === true ? row.replay_id : null,
       createdAt: new Date(row.created_at).toISOString(),
     }));
   }
@@ -399,7 +402,8 @@ async function getPlayerResults(playerId, limit = 10, offset = 0) {
         result.playerId === playerId && result.mode === 'single' &&
         result.validationStatus !== 'rejected'
       ) {
-        results.push(toPublicResult(result));
+        const replays = await getPublicPlayerReplay(playerId, result.id);
+        results.push(toPublicResult(result, replays !== null));
       }
     } catch {
       // Ignore malformed local development records.
@@ -463,7 +467,12 @@ async function getPublicPlayerReplay(playerId, resultId) {
     return null;
   }
   if (!hasPersistentConfig()) {
-    return null;
+    const match = await readResult(resultId, playerId);
+    if (!match || match.mode !== 'single' || match.validationStatus === 'rejected') return null;
+    const unity = require('./unityReplayStore');
+    if (!unity.isReplayId(match.replayId)) return null;
+    const recording = await unity.readReplay(match.replayId, playerId);
+    return recording && recording.validationStatus !== 'rejected' ? [recording.replay] : null;
   }
 
   await ensureSchema();
@@ -475,6 +484,7 @@ async function getPublicPlayerReplay(playerId, resultId) {
       WHERE m.id = $1
         AND m.player_id = $2 AND m.mode = 'single'
         AND m.validation_status <> 'rejected'
+        AND r.validation_status <> 'rejected'
       LIMIT 1
     `,
     [resultId, playerId],
@@ -583,7 +593,7 @@ async function aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedO
   return Array.from(byPlayer.values());
 }
 
-function toPublicResult(result) {
+function toPublicResult(result, replayAvailable = typeof result.replayId === 'string' && result.validationStatus !== 'rejected') {
   return {
     id: result.id,
     seasonId: result.seasonId,
@@ -593,9 +603,35 @@ function toPublicResult(result) {
     gamePoints: result.gamePoints,
     won: result.won,
     validationStatus: result.validationStatus,
-    replayAvailable: typeof result.replayId === 'string',
+    replayAvailable: replayAvailable === true,
+    hasReplay: replayAvailable === true,
+    replayId: replayAvailable === true ? result.replayId : null,
     createdAt: result.createdAt,
   };
+}
+
+async function readResult(id, playerId) {
+  if (typeof id !== 'string' || !/^mtc-[a-z0-9-]{1,100}$/i.test(id) || !isValidPlayerId(playerId)) return null;
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const row = (await getPgPool().query(`SELECT * FROM ${TABLE_NAME} WHERE id=$1 AND player_id=$2`, [id, playerId])).rows[0];
+    return row ? { id: row.id, playerId: row.player_id, provider: row.provider, walletAddress: row.wallet_address,
+      displayName: row.display_name, seasonId: row.season_id, mode: row.mode, levelNumber: Number(row.level_number),
+      score: Number(row.score), gamePoints: Number(row.game_points), won: row.won, replayId: row.replay_id,
+      validationStatus: row.validation_status, createdAt: new Date(row.created_at).toISOString() } : null;
+  }
+  try {
+    const result = JSON.parse(await fs.readFile(path.join(getDataDir(), `${id}.json`), 'utf8'));
+    return result.playerId === playerId ? result : null;
+  } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+async function rejectPendingReplayResult(id, playerId) {
+  const result = await readResult(id, playerId);
+  if (!result || result.validationStatus !== 'pending') return;
+  result.validationStatus = 'rejected';
+  const file = path.join(getDataDir(), `${id}.json`);
+  const temporary = `${file}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(result)); await fs.rename(temporary, file);
 }
 
 function clampInteger(value, min, max) {
@@ -627,6 +663,8 @@ function isValidPlayer(value) {
 }
 
 module.exports = {
+  readResult,
+  rejectPendingReplayResult,
   getPlayerStats,
   computeGamePoints,
   getLeaderboard,

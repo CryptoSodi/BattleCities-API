@@ -32,7 +32,7 @@ export async function GET(
     );
     return replays === null
       ? createJsonResponse(request, { error: 'Replay not found' }, 404)
-      : createJsonResponse(request, { item: { replays } });
+      : createJsonResponse(request, { item: { replays, ...(replays[0]?.format === 'battlecities-unity-input-v1' ? { replay: replays[0] } : {}) } });
   }
 
   const currentSeason = await seasonStore.getCurrentSeason();
