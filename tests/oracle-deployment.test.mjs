@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { parseRequest, assertMigrationState, activateRelease } from '../scripts/oracle/deploy-shared.mjs';
+import { parseRequest, assertMigrationState, activateRelease, migrationDigest } from '../scripts/oracle/deploy-shared.mjs';
 
 test('deployment SSH entry rejects shell commands, extra arguments and injection', () => {
   const commit = 'a'.repeat(40), checksum = 'b'.repeat(64);
@@ -21,6 +21,11 @@ test('automatic deployment blocks pending, removed and rewritten migrations', ()
   const next = { ...files, '032_reviewed_change': 'reviewed-hash' };
   assert.doesNotThrow(() => assertMigrationState(Object.keys(next), files, next, { '032_reviewed_change': 'reviewed-hash' }));
   assert.throws(() => assertMigrationState(Object.keys(next), files, next, { '032_reviewed_change': 'different-hash' }), /applied migration was changed/);
+});
+
+test('SQL migration hashes tolerate Windows line endings and reject actual SQL changes', () => {
+  assert.equal(migrationDigest('SELECT 1;\r\nSELECT 2;\r\n'), migrationDigest('SELECT 1;\nSELECT 2;\n'));
+  assert.notEqual(migrationDigest('SELECT 1;\n'), migrationDigest('DROP TABLE battlecity_players;\n'));
 });
 
 async function fixture(callback) {

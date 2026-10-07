@@ -21,7 +21,7 @@ The application is stopped only for the final service restart; building, restori
 
 Automatic deployment **does not modify the production schema**. Every migration recorded in production must still exist unchanged in the incoming release. A pending, removed, or rewritten migration fails deployment before the running API is changed.
 
-Schema changes require a separately reviewed database rollout, with a backup and validation against a database copy. After that migration is applied safely, an administrator records its exact SQL SHA-256 under its migration version in the root-owned `/etc/battlecities/api-migration-approvals.json`, then reruns the workflow. The deployment key cannot modify this approval file. This gate also prevents a code rollback from automatically overwriting newer player data with an older database snapshot.
+Schema changes require a separately reviewed database rollout, with a backup and validation against a database copy. After that migration is applied safely, an administrator records its SQL SHA-256 after normalizing line endings to LF under its migration version in the root-owned `/etc/battlecities/api-migration-approvals.json`, then reruns the workflow. The deployment key cannot modify this approval file. This gate also prevents a code rollback from automatically overwriting newer player data with an older database snapshot.
 
 ## Server layout
 

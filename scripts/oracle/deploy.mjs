@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { activateRelease, assertMigrationState } from './deploy-shared.mjs';
+import { activateRelease, assertMigrationState, migrationDigest } from './deploy-shared.mjs';
 
 const base = '/opt/battlecities-api';
 const pointer = `${base}/current`;
@@ -39,7 +39,7 @@ function migrationFiles(release) {
   const files = {};
   const directory = path.join(release, 'migrations');
   if (!fs.lstatSync(directory).isDirectory()) throw new Error('Invalid migration directory.');
-  for (const name of fs.readdirSync(directory).filter((name) => /^\d+_[a-z0-9_-]+\.sql$/.test(name))) files[name.slice(0, -4)] = crypto.createHash('sha256').update(regularFile(path.join(directory, name))).digest('hex');
+  for (const name of fs.readdirSync(directory).filter((name) => /^\d+_[a-z0-9_-]+\.sql$/.test(name))) files[name.slice(0, -4)] = migrationDigest(regularFile(path.join(directory, name)).toString('utf8'));
   return files;
 }
 function dump(database, destination) {

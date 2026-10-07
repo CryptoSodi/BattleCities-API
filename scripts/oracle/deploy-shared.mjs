@@ -1,5 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+
+export function migrationDigest(sql) {
+  return crypto.createHash('sha256').update(String(sql).replace(/\r\n/g, '\n')).digest('hex');
+}
 
 export function parseRequest(command) {
   if (command === 'status') return { action: 'status' };
