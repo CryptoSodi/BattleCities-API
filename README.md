@@ -1,4 +1,4 @@
-# Battle Cities API 0.3.2
+# Battle Cities API 0.3.4
 
 Standalone HTTP API for the current single-player game and command center.
 Node.js 18+; PostgreSQL is required in production. Local JSON storage is for

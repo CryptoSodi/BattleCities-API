@@ -2,12 +2,13 @@ declare const require: any;
 import { createJsonResponse, createOptionsResponse } from '../_helpers';
 import { isResponse, requireAdmin } from './_helpers';
 const settings = require('../../services/competitionConfig');
+const runtime = require('../../services/competitionReadiness');
 
 export function OPTIONS(request: Request): Response { return createOptionsResponse(request); }
 export async function GET(request: Request): Promise<Response> {
   const admin = await requireAdmin(request);
   if (isResponse(admin)) return admin;
-  return createJsonResponse(request, { ok: true, settings: await settings.get() });
+  return createJsonResponse(request, { ok: true, settings: await settings.get(), runtime: await runtime.status() });
 }
 export async function PUT(request: Request): Promise<Response> {
   const admin = await requireAdmin(request);

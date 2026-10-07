@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
-const { Keypair, Connection, PublicKey } = require('@solana/web3.js');
+const { Keypair, Connection, PublicKey, Transaction, SystemProgram } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } = require('@solana/spl-token');
 const store = require('../src/stores/competitionStore');
 const config = require('../src/services/competitionConfig');
@@ -18,7 +18,8 @@ const rpc = require('../src/services/solanaRpc');
 const skr = require('../src/services/skrToken');
 const delivery = require('../src/services/rankingPayoutDelivery');
 let root;
-const wallet = Keypair.generate().publicKey.toBase58();
+const walletKeypair = Keypair.generate();
+const wallet = walletKeypair.publicKey.toBase58();
 const player = { id: 'ply-ranking-test', provider: 'wallet', walletAddress: wallet, displayName: 'Test Commander' };
 const season = { id: 'season-1', name: 'Season 1', number: 1, startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z' };
 beforeEach(async () => {
@@ -95,6 +96,81 @@ test('SOL pass purchases verify exact transfer amounts and survive repeated veri
   amount = 100000000;
   assert.equal((await shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature })).seasonPass.eligibleFrom, current.startsAt);
   assert.equal((await shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature })).statusText, 'PURCHASE ALREADY VERIFIED');
+});
+
+async function signedQuote(t) {
+  const current = { ...season, startsAt: new Date(Date.now() - 86400000).toISOString(), endsAt: new Date(Date.now() + 86400000).toISOString() };
+  await fs.writeFile(path.join(root, 'seasons', 'seasons.json'), JSON.stringify([current]));
+  await config.update(settings(), 'ply-admin');
+  t.mock.method(Connection.prototype, 'getLatestBlockhash', async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 100 }));
+  t.mock.method(Connection.prototype, 'simulateTransaction', async () => ({ value: { err: null } }));
+  t.mock.method(Connection.prototype, 'getSignatureStatuses', async () => ({ value: [null] }));
+  const quote = await shop.createQuote(player, { itemId: 'season-pass', currency: 'sol', seasonId: current.id });
+  const tx = Transaction.from(Buffer.from(quote.transaction, 'base64'));
+  tx.sign(walletKeypair);
+  return { quote, tx, input: { quoteToken: quote.quoteToken, signedTransaction: tx.serialize().toString('base64') } };
+}
+
+test('checkout broadcasts only the exact server message signed by the authenticated wallet', async (t) => {
+  const { tx, input } = await signedQuote(t);
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(tx.signature);
+  let sends = 0;
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async bytes => {
+    sends++; assert.deepEqual(bytes, tx.serialize()); return signature;
+  });
+  assert.equal((await shop.submitPurchase(player, input)).signature, signature);
+  assert.equal(sends, 1);
+  tx.add(SystemProgram.transfer({ fromPubkey: walletKeypair.publicKey, toPubkey: Keypair.generate().publicKey, lamports: 1 }));
+  tx.sign(walletKeypair);
+  await assert.rejects(shop.submitPurchase(player, { ...input, signedTransaction: tx.serialize().toString('base64') }), /does not match/);
+  await assert.rejects(shop.submitPurchase({ ...player, walletAddress: Keypair.generate().publicKey.toBase58() }, input), /wallet/i);
+  assert.equal(sends, 1);
+});
+
+test('an uncertain broadcast retains its signature for reconciliation without a second payment', async (t) => {
+  const { tx, input } = await signedQuote(t);
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async () => { throw new Error('Timeout after submission'); });
+  const result = await shop.submitPurchase(player, input);
+  assert.equal(result.pending, true);
+  assert.equal(result.signature, bs58.encode(tx.signature));
+  assert.equal(await store.getPass(player.id, season.id), null);
+});
+
+test('an unsigned quote cannot broadcast, and finalized expiry releases an unpaid receipt', async (t) => {
+  const { quote, input } = await signedQuote(t);
+  let sends=0;
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async () => {sends++;throw new Error();});
+  await assert.rejects(shop.submitPurchase(player,{...input,signedTransaction:quote.transaction}), /does not match/);
+  const now=Date.now();t.mock.method(Date,'now',()=>now+3600000);
+  t.mock.method(rpc,'getTransaction',async()=>null);
+  const connection={getSignatureStatuses:async()=>({value:[null]}),getBlockHeight:async()=>101};
+  assert.equal((await shop.submitPurchase(player,input,connection)).terminal,true);
+  assert.equal(sends,0);
+});
+
+test('late verification credits an on-time payment, and rejects a payment outside its original window', async (t) => {
+  const { quote, input } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now + 3600000);
+  let blockTime = Math.floor((payload.issuedAt + 10000) / 1000);
+  t.mock.method(rpc, 'getTransaction', async () => ({ blockTime, meta: { err: null }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [{ program: 'system', parsed: { type: 'transfer', info: {
+      source: wallet, destination: shop.TREASURY, lamports: 100000000 } } }, { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` }]
+  } } }));
+  let sends = 0;
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async () => { sends++; throw new Error(); });
+  blockTime = Math.floor((payload.expiresAt + 120000) / 1000);
+  const connection={getSignatureStatuses:async()=>({value:[null]}),getBlockHeight:async()=>101};
+  assert.equal((await shop.submitPurchase(player, input,connection)).pending, true);
+  assert.equal(sends, 0);
+  blockTime = Math.floor((payload.issuedAt + 10000) / 1000);
+  assert.equal((await shop.submitPurchase(player, input)).ok, true);
+  assert.equal(sends, 0);
+  const current = JSON.parse(await fs.readFile(path.join(root, 'seasons', 'seasons.json'), 'utf8'))[0];
+  assert.equal((await store.getPass(player.id, season.id)).eligibleFrom, current.startsAt);
 });
 
 test('payout retries resend persisted bytes and stop after confirmation', async (t) => {

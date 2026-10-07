@@ -15,6 +15,7 @@ const LIMITS = {
   'presence-heartbeat': { max: 120, windowMs: 60 * 1000 },
   'shop-purchase-quote': { max: 20, windowMs: 60 * 1000 },
   'shop-purchase-verify': { max: 20, windowMs: 60 * 1000 },
+  'shop-purchase-submit': { max: 10, windowMs: 60 * 1000 },
   'x-oauth-start': { max: 10, windowMs: 60 * 1000 },
   'native-oauth-start': { max: 10, windowMs: 60 * 1000 },
   'skr-swap-quote': { max: 20, windowMs: 60 * 1000 },

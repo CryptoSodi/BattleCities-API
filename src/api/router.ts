@@ -21,6 +21,7 @@ import * as economyDropRoll from '../routes/economy/dropRoll';
 import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
 import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
+import * as economyPurchaseSubmit from '../routes/economy/purchaseSubmit';
 import * as economyWalletBalance from '../routes/economy/walletBalance';
 import * as health from '../routes/health';
 import * as leaderboardRewards from '../routes/leaderboardRewards';
@@ -85,6 +86,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'economy/ledger': economyLedger,
   'economy/purchase/quote': economyPurchaseQuote,
   'economy/purchase/verify': economyPurchaseVerify,
+  'economy/purchase/submit': economyPurchaseSubmit,
   'economy/wallet-balance': economyWalletBalance,
   health,
   'integrations/discord/interactions': discordInteractions,

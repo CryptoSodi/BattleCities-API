@@ -12,6 +12,7 @@ const catalog = require(base + 'routes/economy/catalog');
 const history = require(base + 'routes/leaderboardHistory');
 const native = require(base + 'routes/integrations/nativeOAuth');
 const swap = require(base + 'routes/trading/swap');
+const submit = require(base + 'routes/economy/purchaseSubmit');
 const sessions = require(base + 'stores/sessionStore');
 const players = require(base + 'stores/playerStore');
 const identity = require(base + 'services/sessionIdentity');
@@ -35,7 +36,7 @@ test('new private endpoints reject unauthenticated access', async () => {
   for (const [handler, pathname, method] of [[admin.GET, 'admin/competitions', 'GET'],
     [admin.PUT, 'admin/competitions', 'PUT'], [reviews.POST, 'admin/match-reviews', 'POST'],
     [native.POST, 'integrations/x/oauth/native/start', 'POST'], [native.GET, 'integrations/oauth/native/status', 'GET'],
-    [swap.POST, 'trading/swap/quote', 'POST']]) {
+    [swap.POST, 'trading/swap/quote', 'POST'], [submit.POST, 'economy/purchase/submit', 'POST']]) {
     assert.equal((await handler(req(pathname, method))).status, 401);
   }
 });

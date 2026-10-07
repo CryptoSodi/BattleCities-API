@@ -125,7 +125,6 @@ async function createQuote(player, input) {
     issuedAt,
     expiresAt: issuedAt + QUOTE_TTL_MS,
   };
-  const quoteToken = signPayload(payload, config.quoteSecret);
   const connection = new Connection(config.rpcUrl, 'confirmed');
   if (currency === 'skr') await skrToken.validateMint(connection, token);
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
@@ -193,8 +192,11 @@ async function createQuote(player, input) {
       : `The payment could not be prepared. Check your ${currency === 'skr' ? 'SKR' : 'BATC'} and SOL balances.`);
   }
 
+  // Bind the quote to the exact transaction message before the wallet signs it.
+  payload.messageHash = crypto.createHash('sha256').update(transaction.serializeMessage()).digest('hex');
+  payload.lastValidBlockHeight = lastValidBlockHeight;
   return {
-    quoteToken,
+    quoteToken: signPayload(payload, config.quoteSecret),
     transaction: transaction.serialize({
       requireAllSignatures: false,
       verifySignatures: false,
@@ -337,8 +339,7 @@ function validateQuote(quote, config, player) {
     || !Number.isFinite(quote.issuedAt)
     || !Number.isFinite(quote.expiresAt)
     || quote.expiresAt <= quote.issuedAt
-    || quote.expiresAt - quote.issuedAt > QUOTE_TTL_MS
-    || Date.now() > quote.expiresAt + MAX_CLOCK_SKEW_MS) {
+    || quote.expiresAt - quote.issuedAt > QUOTE_TTL_MS) {
     throw new Error('Quote does not match the mainnet shop.');
   }
   if (quote.v === 2 && (quote.tokenProgram !== config.tokenProgramId.toBase58() || quote.tokenDecimals !== config.tokenDecimals)) {
@@ -362,6 +363,64 @@ function validateQuote(quote, config, player) {
     : BigInt(item.price) * 1_000_000n;
   if (BigInt(quote.amountAtomic) !== expected) {
     throw new Error('Quote price no longer matches the shop catalog.');
+  }
+}
+
+async function submitPurchase(player, input, connection = null) {
+  const config = getConfig();
+  assertConfigured(config);
+  const quote = verifyQuoteToken(input?.quoteToken, config.quoteSecret);
+  const token = quote.currency === 'skr' ? skrToken.requireConfig() : {
+    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
+  };
+  validateQuote(quote, { ...config, tokenMint: new PublicKey(token.mint),
+    tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals }, player);
+  const encoded = input?.signedTransaction;
+  if (typeof encoded !== 'string' || encoded.length > 2000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new Error('Invalid signed transaction.');
+  }
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length > 1232 || bytes[0] !== 1) throw new Error('Invalid shop transaction size or signatures.');
+  const transaction = Transaction.from(bytes);
+  const hash = crypto.createHash('sha256').update(transaction.serializeMessage()).digest('hex');
+  if (!/^[a-f0-9]{64}$/.test(quote.messageHash || '') || hash !== quote.messageHash
+    || transaction.feePayer?.toBase58() !== player.walletAddress
+    || transaction.signatures.length !== 1 || !transaction.verifySignatures()) {
+    throw new Error('Signed transaction does not match the shop quote.');
+  }
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(transaction.signature);
+  const existing = await shopPaymentStore.readPayment(quote.id);
+  if (existing) return { ...await verifyPurchase(player, { quoteToken: input.quoteToken, signature }), signature };
+  connection ||= new Connection(config.rpcUrl, 'confirmed');
+  // Late retries can reconcile a confirmed payment, but never broadcast an expired quote.
+  if (Date.now() > quote.expiresAt) {
+    try { return { ...await verifyPurchase(player, { quoteToken: input.quoteToken, signature }), signature }; }
+    catch {
+      try {
+        let status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
+        if (status?.err && status.confirmationStatus === 'finalized') {
+          return { ok: false, terminal: true, signature, statusText: 'Payment failed on chain. No items were granted.' };
+        }
+        if (!status && Number.isSafeInteger(quote.lastValidBlockHeight)
+          && await connection.getBlockHeight('finalized') > quote.lastValidBlockHeight) {
+          status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
+          if (!status && !await solanaRpc.getTransaction(signature, config.rpcUrl)) {
+            return { ok: false, terminal: true, signature, statusText: 'Payment expired without confirmation. No items were granted.' };
+          }
+        }
+      } catch { /* Uncertain RPC results retain the receipt for another check. */ }
+      return { ok: false, pending: true, signature, statusText: 'Check this payment before making another purchase.' };
+    }
+  }
+  try {
+    const sent = await connection.sendRawTransaction(bytes, { skipPreflight: false, maxRetries: 3 });
+    if (sent !== signature) throw new Error('Unexpected payment signature.');
+    return { ok: true, submitted: true, signature, statusText: 'PAYMENT SUBMITTED' };
+  } catch {
+    // A network timeout can occur after submission. The client retains the exact
+    // signed bytes and signature, and retries verification instead of paying again.
+    return { ok: false, pending: true, signature, statusText: 'Payment confirmation is pending. Check this payment.' };
   }
 }
 
@@ -458,4 +517,6 @@ module.exports = {
   getWalletBalances,
   verifyPayment,
   verifyPurchase,
+  submitPurchase,
+  getConfig,
 };

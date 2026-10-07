@@ -1,9 +1,9 @@
-# Competitions and native client API (0.3.2)
+# Competitions and native client API (0.3.4)
 
 All paths below are relative to `/api`. Authenticated calls use the existing
 `battlecity_session` cookie. Admin calls use the existing admin allowlist.
-The Unity Shop UI still needs to consume this catalog; this change implements
-the API and does not add a Unity tab or an admin dashboard screen.
+The Unity Shop consumes this catalog, including its Season Pass tab. Prices and
+prize policies are editable in the admin Competition settings page.
 
 ## Season passes
 
@@ -20,17 +20,30 @@ The pass expires at the season end and never credits a different season.
 - `POST /economy/purchase/quote`: `{ "itemId": "season-pass", "currency": "skr",
   "seasonId": "season-1", "walletAddress": "<authenticated wallet>" }`.
   Use `"sol"` for SOL. Sign the returned transaction with the authenticated wallet.
-- Submit the signed transaction using the existing wallet flow, then
+- Persist the exact signed transaction and its signature locally **before** sending
+  `POST /economy/purchase/submit`: `{ "quoteToken": "...", "signedTransaction": "<base64>" }`.
+  This relays only the authenticated wallet's signature on the exact quoted message.
+  A successful submission is not purchase credit. Then call
   `POST /economy/purchase/verify`: `{ "quoteToken": "...", "signature": "..." }`.
   The response contains the entitlement and account. Repeating verification with
   the same payment returns the existing purchase. A quote is valid for two minutes,
   with one minute of clock skew. Sales close three minutes before the season ends.
+- Retry the same receipt after a timeout or app restart; do not create another
+  payment while confirmation is pending. An expired quote is never broadcast.
+  An on-time confirmed payment can still be verified later using its chain timestamp.
+  Only a verified response with an account grants the purchase; `pending: true`
+  remains retryable and `terminal: true` confirms that the unpaid transaction expired
+  or failed. The relay may return HTTP 202 while confirmation is unresolved.
 - `GET /economy/wallet-balance` adds `skrBalance` and `skrBalanceAtomic` as exact
   decimal strings. They are null until SKR is configured. Existing BATC fields remain.
 
 ## Admin prices and prizes
 
-`GET /admin/competitions` reads settings. `PUT /admin/competitions` replaces the
+`GET /admin/competitions` reads settings and `runtime` readiness: worker/delivery
+flags, SKR metadata, shop configuration, reward wallet address, SOL/SKR balances,
+and launch blockers. It never returns the wallet key or configuration secrets.
+Balance checks time out rather than blocking admin requests indefinitely.
+`PUT /admin/competitions` replaces the
 complete document. Prices and rewards are decimal strings in whole currency units.
 All sales and prize policies start disabled. Example amounts below are illustrative,
 not production defaults:
