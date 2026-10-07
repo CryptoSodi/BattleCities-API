@@ -1,6 +1,6 @@
 # Unity input replay API contract
 
-Status: backend implemented and verified locally on `codex/unity-replay-api`, including public profile WATCH requested on 7 October 2026. Complete suite: 115 tests, 112 passed, 0 failed, 3 existing Linux deployment tests skipped on Windows. Backend work is local only in `C:/repos/BattleCities-API`; no push or deployment. Unity files are not modified by this chat.
+The backend implements authenticated Unity recording sessions, uploads, owner libraries/status, and public profile WATCH. The 115-test suite includes PostgreSQL ownership and concurrent retry checks. Production rollout requires migration 032 before deploying this API version; GitHub Actions and the Oracle controller validate each release before activation.
 
 ## Existing behavior and verification boundary
 
@@ -162,9 +162,9 @@ Backend exposes honest status and internal `unityReplayStore.recordReproduction(
 
 ## Rollout
 
-Migration `032_unity_input_replays.sql` adds server sessions and enforces one Unity replay per match. Payloads remain in the existing replay table so admin evidence retrieval works. Legacy rows and users are preserved. Startup readiness now requires migration 032. Schema changes and release remain reviewable and undeployed in this task.
+Migration `032_unity_input_replays.sql` adds server sessions and enforces one Unity replay per match. Payloads remain in the existing replay table so admin evidence retrieval works. Legacy rows and users are preserved. Startup readiness now requires migration 032. Apply this additive migration separately after validating it on a protected production database copy. Retain a production backup and record its LF-normalized SHA256 in the root-owned migration approval map. The deployment controller checks the exact migration ledger and checksums, then runs tests against an isolated database copy before switching the live service.
 
-The optional operator verifier is `node scripts/verify-unity-replay.mjs urp-<ID>`. Set `BATTLECITY_UNITY_REPLAY_VERIFIER` to an absolute trusted `ReplayVerifier.dll` path built from the Unity project's `Tools/ReplayVerifier/ReplayVerifier.csproj`, alongside its .NET runtime files. Set `BATTLECITY_DOTNET_BINARY` when `dotnet` is not on PATH. The server supplies only a generated private temporary JSON path to the configured executable. Execution has a 30-second timeout and 64 KiB output cap; no caller selects an executable or path. CLI exit codes: 0 matched, 1 another recorded outcome, 2 configuration/execution failure. This is an operator command, not an automatic verification worker; nothing runs on Oracle in this task.
+The optional operator verifier is `node scripts/verify-unity-replay.mjs urp-<ID>`. Set `BATTLECITY_UNITY_REPLAY_VERIFIER` to an absolute trusted `ReplayVerifier.dll` path built from the Unity project's `Tools/ReplayVerifier/ReplayVerifier.csproj`, alongside its .NET runtime files. Set `BATTLECITY_DOTNET_BINARY` when `dotnet` is not on PATH. The server supplies only a generated private temporary JSON path to the configured executable. Execution has a 30-second timeout and 64 KiB output cap; no caller selects an executable or path. CLI exit codes: 0 matched, 1 another recorded outcome, 2 configuration/execution failure. This is an operator command, not an automatic verification worker. Deploying the replay APIs does not configure or start the trusted verifier.
 
 Verified locally:
 
