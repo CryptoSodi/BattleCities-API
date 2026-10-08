@@ -58,6 +58,10 @@ function computeGamePoints(input) {
 }
 
 async function submitResult(player, season, input) {
+  return database.withTransaction(() => storeResult(player, season, input));
+}
+
+async function storeResult(player, season, input) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
   }
@@ -116,6 +120,7 @@ async function submitResult(player, season, input) {
         result.createdAt,
       ],
     );
+    await require('./playerStore').mergeHighscores(player.id, result.score, 0);
     return result;
   }
 
@@ -126,6 +131,8 @@ async function submitResult(player, season, input) {
     'utf8',
   );
 
+  // Personal high scores remain provisional; this does not approve a match/prize.
+  await require('./playerStore').mergeHighscores(player.id, result.score, 0);
   return result;
 }
 
