@@ -26,10 +26,11 @@ const competitionStore = require('../stores/competitionStore');
 const seasonStore = require('../stores/seasonStore');
 const ledgerStore = require('../stores/ledgerStore');
 
-const NETWORK = 'mainnet-beta';
+const solanaNetwork = require('../config/solanaNetwork');
+const NETWORK = solanaNetwork.network();
 const TOKEN_MINT = 'Hxs5gXuPHv3Jhm7PYQv9iFMQp5ZYL2Fk6bgWdvQz15bz';
 const TREASURY = '6wQz66BgRsX6DVHAD3PDCXjKVpe3LLrj3FGiQwCSZV7F';
-const PUBLIC_RPC_URL = 'https://api.mainnet-beta.solana.com';
+const PUBLIC_RPC_URL = solanaNetwork.publicRpcUrl();
 const TOKEN_DECIMALS = 6;
 const QUOTE_TTL_MS = 2 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS = 60 * 1000;
@@ -62,6 +63,7 @@ function getConfig() {
   } catch {
     // Configuration validation below returns a stable error.
   }
+  solanaNetwork.assertRpcUrl(rpcUrl);
   return { quoteSecret, rpcUrl, treasury, tokenMint };
 }
 
@@ -277,7 +279,7 @@ async function verifyPurchase(player, input) {
   const paymentConfig = { ...config, tokenMint: new PublicKey(token.mint), tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals };
   validateQuote(quote, paymentConfig, player);
   const transaction = await solanaRpc.getTransaction(signature, config.rpcUrl);
-  if (transaction === null) throw new Error('Transaction is not confirmed on Solana mainnet yet.');
+  if (transaction === null) throw new Error('Transaction is not confirmed on Solana ' + NETWORK + ' yet.');
   verifyPayment(transaction, quote, paymentConfig);
   const confirmedAt = transaction.blockTime
     ? new Date(transaction.blockTime * 1000).toISOString()
@@ -340,7 +342,7 @@ function validateQuote(quote, config, player) {
     || !Number.isFinite(quote.expiresAt)
     || quote.expiresAt <= quote.issuedAt
     || quote.expiresAt - quote.issuedAt > QUOTE_TTL_MS) {
-    throw new Error('Quote does not match the mainnet shop.');
+    throw new Error('Quote does not match the ' + NETWORK + ' shop.');
   }
   if (quote.v === 2 && (quote.tokenProgram !== config.tokenProgramId.toBase58() || quote.tokenDecimals !== config.tokenDecimals)) {
     throw new Error('Quote token does not match the shop.');
