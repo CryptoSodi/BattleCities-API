@@ -19,6 +19,7 @@ async function getTransaction(signature, rpcUrl = getRpcUrl()) {
     throw new Error('global fetch is not available in this runtime');
   }
 
+  require('../config/solanaNetwork').assertRpcUrl(rpcUrl);
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

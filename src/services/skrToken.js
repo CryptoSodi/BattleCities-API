@@ -1,4 +1,5 @@
 const { PublicKey } = require('@solana/web3.js');
+const solanaNetwork = require('../config/solanaNetwork');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getMint } = require('@solana/spl-token');
 
 function config() {
@@ -11,7 +12,7 @@ function config() {
     || ![TOKEN_PROGRAM_ID.toBase58(), TOKEN_2022_PROGRAM_ID.toBase58()].includes(programId)) {
     throw new Error('Invalid SKR token configuration.');
   }
-  return { mint, decimals, programId, currency: 'skr', network: 'mainnet-beta' };
+  return { mint, decimals, programId, currency: 'skr', network: solanaNetwork.network() };
 }
 function requireConfig() {
   const value = config();

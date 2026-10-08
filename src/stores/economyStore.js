@@ -1,10 +1,22 @@
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const storageConfig = require('../config/storageConfig');
 const database = require('../database');
 const ledgerStore = require('./ledgerStore');
 
 const TABLE_NAME = 'battlecity_economy_accounts';
+const localMutations = new Map();
+
+// PostgreSQL mutations lock the account row inside the shared transaction.
+// Local development serializes the complete balance/receipt operation per player.
+function withAccountMutation(player, operation) {
+  if (hasPersistentConfig()) return database.withTransaction(async () => operation(await lockAccountForFuelMutation(player)));
+  const previous = localMutations.get(player.id) || Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => operation(await ensureAccountForPlayer(player)));
+  localMutations.set(player.id, next);
+  return next.finally(() => { if (localMutations.get(player.id) === next) localMutations.delete(player.id); });
+}
 const SHOP_STARTING_TOKEN_BALANCE = 1000;
 const SHOP_STARTING_SOL_BALANCE = 1.25;
 const SHOP_STARTING_FUEL_BALANCE = 5;
@@ -114,16 +126,8 @@ async function ensureAccountForPlayer(player) {
   }
 
   const existing = await readAccount(player.id);
-  if (existing !== null) {
-    const updated = {
-      ...existing,
-      provider: player.provider,
-      walletAddress: player.walletAddress || existing.walletAddress || null,
-      updatedAt: new Date().toISOString(),
-    };
-    await writeAccount(updated);
-    return updated;
-  }
+  // An account read must never write stale balances over a concurrent mutation.
+  if (existing !== null) return existing;
 
   const now = new Date().toISOString();
   const account = normalizeAccount({
@@ -139,8 +143,24 @@ async function ensureAccountForPlayer(player) {
     updatedAt: now,
   });
 
-  await writeAccount(account);
-  return account;
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    await getPgPool().query(`INSERT INTO ${TABLE_NAME}
+      (player_id, provider, wallet_address, token_balance, sol_balance, fuel_balance,
+       inventory_json, loadout_json, created_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$9)
+      ON CONFLICT (player_id) DO NOTHING`, [account.playerId, account.provider, account.walletAddress,
+      account.tokenBalance, account.solBalance, account.fuelBalance, '{}', '{}', now]);
+  } else {
+    await ensureDataDir();
+    const temporary = `${getAccountPath(player.id)}.${crypto.randomUUID()}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(account), 'utf8');
+    // Linking publishes the complete file atomically without replacing a racing creator.
+    try { await fs.link(temporary, getAccountPath(player.id)); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    finally { await fs.unlink(temporary); }
+  }
+  return readAccount(player.id);
 }
 
 async function upsertAccountForPlayer(player, snapshot) {
@@ -148,12 +168,12 @@ async function upsertAccountForPlayer(player, snapshot) {
     throw new Error('Invalid player');
   }
 
-  const existing = await ensureAccountForPlayer(player);
-  const nextSnapshot = typeof snapshot === 'object' && snapshot !== null ? snapshot : {};
-  const normalized = normalizeSyncedAccount(existing, nextSnapshot, player);
-
-  await writeAccount(normalized);
-  return normalized;
+  return withAccountMutation(player, async (existing) => {
+    const nextSnapshot = typeof snapshot === 'object' && snapshot !== null ? snapshot : {};
+    const normalized = normalizeSyncedAccount(existing, nextSnapshot, player);
+    await writeAccount(normalized);
+    return normalized;
+  });
 }
 
 function getShopCatalogItem(itemId) {
@@ -179,26 +199,55 @@ async function grantOnChainPurchaseForPlayer(
   }
   const item = { ...configuredItem, ...paidPrice };
 
-  const account = await ensureAccountForPlayer(player);
-  if (typeof item.fuel === 'number' && item.fuel > 0) {
-    account.fuelBalance += item.fuel;
-  }
-  if (item.inventory !== undefined) {
-    Object.keys(item.inventory).forEach((key) => {
-      account.inventory[key] = (account.inventory[key] || 0) + item.inventory[key];
-    });
-  }
+  return withAccountMutation(player, async (account) => {
+    if (typeof item.fuel === 'number' && item.fuel > 0) {
+      account.fuelBalance += item.fuel;
+    }
+    if (item.inventory !== undefined) {
+      Object.keys(item.inventory).forEach((key) => {
+        account.inventory[key] = (account.inventory[key] || 0) + item.inventory[key];
+      });
+    }
 
-  account.updatedAt = new Date().toISOString();
-  await writeAccount(account);
-  await appendPurchaseLedgerEntries(
-    { ...account, walletAddress: paymentWalletAddress },
-    item,
-    itemId,
-    paymentCurrency,
-    signature,
-  );
-  return toPublicAccount(account);
+    account.updatedAt = new Date().toISOString();
+    await writeAccount(account);
+    await appendPurchaseLedgerEntries(
+      { ...account, walletAddress: paymentWalletAddress },
+      item,
+      itemId,
+      paymentCurrency,
+      signature,
+    );
+    return toPublicAccount(account);
+  });
+}
+
+async function consumeFuelForPlayer(player, requestId, tankTier) {
+  if (!isValidPlayer(player)) throw new Error('Invalid player');
+  if (typeof requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(requestId)
+      || !Number.isInteger(tankTier) || tankTier < 0 || tankTier > 3) {
+    return { ok: false, status: 400, requestId, fuelConsumed: 0, error: 'Invalid request ID or tank tier' };
+  }
+  requestId = requestId.toLowerCase();
+  const cost = tankTier + 1;
+  return withAccountMutation(player, async (account) => {
+    const sourceType = 'fuel-consumption';
+    const previous = await ledgerStore.findEntryBySource(player.id, sourceType, requestId);
+    if (previous) {
+      const sameTier = previous.currency === 'fuel' && previous.amount === -cost;
+      return { ok: sameTier, status: sameTier ? 200 : 409, requestId, fuelConsumed: sameTier ? cost : 0,
+        idempotent: true, ...(sameTier ? {} : { error: 'Request ID already used for another tank tier' }),
+        account: toPublicAccount(account) };
+    }
+    if (account.fuelBalance < cost) return { ok: false, status: 409, requestId, fuelConsumed: 0,
+      error: 'Insufficient fuel', account: toPublicAccount(account) };
+    account.fuelBalance -= cost;
+    account.updatedAt = new Date().toISOString();
+    await writeAccount(account);
+    await ledgerStore.appendEntries({ playerId: player.id, walletAddress: player.walletAddress || null,
+      currency: 'fuel', amount: -cost, reason: 'match-started', sourceType, sourceId: requestId });
+    return { ok: true, status: 200, requestId, fuelConsumed: cost, idempotent: false, account: toPublicAccount(account) };
+  });
 }
 
 async function consumePowerupForPlayer(
@@ -222,11 +271,8 @@ async function consumePowerupForPlayer(
     return { ok: false, statusText: 'INVALID REQUEST' };
   }
 
-  return database.withTransaction(async () => {
+  return withAccountMutation(player, async (account) => {
     const sourceType = 'powerup-consumption';
-    let account = hasPersistentConfig()
-      ? await lockAccountForFuelMutation(player)
-      : await ensureAccountForPlayer(player);
     const previous = await ledgerStore.findEntryBySource(
       player.id,
       sourceType,
@@ -338,10 +384,8 @@ async function creditFuel(player, amount, context = {}) {
     return ensureAccountForPlayer(player);
   }
 
-  return database.withTransaction(async () => {
-    let account;
+  return withAccountMutation(player, async (account) => {
     if (hasPersistentConfig()) {
-      account = await lockAccountForFuelMutation(player);
       const updated = await getPgPool().query(
         `
           UPDATE ${TABLE_NAME}
@@ -355,7 +399,6 @@ async function creditFuel(player, amount, context = {}) {
       );
       account = normalizeAccount(fromRow(updated.rows[0]));
     } else {
-      account = await ensureAccountForPlayer(player);
       account.fuelBalance += safeAmount;
       account.updatedAt = new Date().toISOString();
       await writeAccount(account);
@@ -453,11 +496,10 @@ async function writeAccount(account) {
   }
 
   await ensureDataDir();
-  await fs.writeFile(
-    getAccountPath(normalized.playerId),
-    JSON.stringify(normalized),
-    'utf8',
-  );
+  const target = getAccountPath(normalized.playerId);
+  const temporary = `${target}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(normalized), 'utf8');
+  await fs.rename(temporary, target);
 }
 
 function toPublicAccount(account) {
@@ -511,7 +553,7 @@ function normalizeAccount(value) {
 
 function normalizeSyncedAccount(existing, snapshot, player) {
   const nextInventory = normalizeSyncedInventory(existing.inventory, snapshot.inventory);
-  const nextLoadout = normalizeSyncedLoadout(nextInventory, snapshot.loadout);
+  const nextLoadout = normalizeSyncedLoadout(nextInventory, snapshot.loadout === undefined ? existing.loadout : snapshot.loadout);
 
   return normalizeAccount({
     ...existing,
@@ -682,6 +724,7 @@ function isValidPlayer(value) {
 
 module.exports = {
   creditFuel,
+  consumeFuelForPlayer,
   consumePowerupForPlayer,
   ensureAccountForPlayer,
   getShopCatalogItem,

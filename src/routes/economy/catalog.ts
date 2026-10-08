@@ -5,6 +5,7 @@ const seasons = require('../../stores/seasonStore');
 const competitions = require('../../stores/competitionStore');
 const economy = require('../../stores/economyStore');
 const skr = require('../../services/skrToken');
+const solanaNetwork = require('../../config/solanaNetwork');
 
 export function OPTIONS(request: Request): Response { return createOptionsResponse(request); }
 export async function GET(request: Request): Promise<Response> {
@@ -15,7 +16,7 @@ export async function GET(request: Request): Promise<Response> {
   const itemIds = ['fuel-one','fuel-five','fuel-twenty','shield','base-defence','freeze','speed',
     'upgrade','zoom-out','wipeout','extra-life','starter-pack'];
   return createJsonResponse(request, {
-    currency: { skr: skr.config(), sol: { decimals: 9, network: 'mainnet-beta' } },
+    currency: { skr: skr.config(), sol: { decimals: 9, network: solanaNetwork.network() } },
     items: itemIds.map((id) => { const item = economy.getShopCatalogItem(id); return {
       id, solPrice: String(item.solPrice), skrPrice: config.shopSkrPrices[id] ?? null,
       fuel: item.fuel || 0, inventory: item.inventory || {},
