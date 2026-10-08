@@ -132,6 +132,9 @@ async function createQuote(player, input) {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({ feePayer: wallet, recentBlockhash: blockhash });
   transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }));
+  // Bind the fee policy into the quoted message too. Wallet-added priority
+  // instructions would invalidate its exact-message hash after approval.
+  transaction.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0 }));
 
   if (currency === 'sol') {
     transaction.add(SystemProgram.transfer({

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
-const { Keypair, Connection, PublicKey, Transaction, SystemProgram } = require('@solana/web3.js');
+const { Keypair, Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetInstruction, VersionedTransaction } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } = require('@solana/spl-token');
 const store = require('../src/stores/competitionStore');
 const config = require('../src/services/competitionConfig');
@@ -125,6 +125,27 @@ test('checkout broadcasts only the exact server message signed by the authentica
   tx.sign(walletKeypair);
   await assert.rejects(shop.submitPurchase(player, { ...input, signedTransaction: tx.serialize().toString('base64') }), /does not match/);
   await assert.rejects(shop.submitPurchase({ ...player, walletAddress: Keypair.generate().publicKey.toBase58() }, input), /wallet/i);
+  assert.equal(sends, 1);
+});
+
+test('Phantom-compatible quotes bind an explicit fee and preserve their legacy wire message', async (t) => {
+  const { quote } = await signedQuote(t);
+  const unsigned = Buffer.from(quote.transaction, 'base64');
+  const legacy = Transaction.from(unsigned);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitLimit(legacy.instructions[0]).units, 250000);
+  assert.equal(ComputeBudgetInstruction.decodeSetComputeUnitPrice(legacy.instructions[1]).microLamports, 0n);
+  const immutable = VersionedTransaction.deserialize(unsigned);
+  assert.equal(immutable.version, 'legacy');
+  immutable.sign([walletKeypair]);
+  const bytes = Buffer.from(immutable.serialize());
+  assert.deepEqual(bytes.subarray(65), unsigned.subarray(65));
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(bytes.subarray(1,65));
+  let sends = 0;
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async submitted => {
+    sends++; assert.deepEqual(submitted, bytes); return signature;
+  });
+  assert.equal((await shop.submitPurchase(player, { quoteToken: quote.quoteToken, signedTransaction: bytes.toString('base64') })).signature, signature);
   assert.equal(sends, 1);
 });
 
