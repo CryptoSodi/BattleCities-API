@@ -67,7 +67,8 @@ test('replay session, ingestion, status, retrieval and admin evidence require au
   }
 });
 test('server session binds seed/content/config/version/mode and derives ownership', async (t) => {
-  auth(t); const session = await start();
+  const principal = auth(t); const session = await start();
+  assert.equal(session.playerId, principal.current().id);
   assert.match(session.id, /^urs-[a-f0-9]{32}$/); assert.ok(session.seed > 0 && session.seed <= 0xffffffff);
   assert.equal(session.configHash, settings().configHash);
   assert.equal(Date.parse(session.expiresAt) - Date.parse(session.issuedAt), 86400000);

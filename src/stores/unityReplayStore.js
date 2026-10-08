@@ -33,7 +33,7 @@ function fromRow(row) {
 }
 function toSession(session) {
   if (!session) return null;
-  return { id: session.id, seed: session.seed, simulationVersion: session.simulationVersion, buildVersion: session.buildVersion,
+  return { id: session.id, playerId: session.playerId, seed: session.seed, simulationVersion: session.simulationVersion, buildVersion: session.buildVersion,
     levelNumber: session.levelNumber, levelHash: session.levelHash, configHash: session.configHash, tickRate: session.tickRate,
     mode: session.mode, issuedAt: session.issuedAt, expiresAt: session.expiresAt, replayId: session.replayId,
     status: session.replayId ? 'submitted' : Date.parse(session.expiresAt) <= Date.now() ? 'expired' : 'active',

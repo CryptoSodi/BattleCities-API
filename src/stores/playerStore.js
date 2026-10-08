@@ -5,6 +5,14 @@ const storageConfig = require('../config/storageConfig');
 const database = require('../database');
 
 const TABLE_NAME = 'battlecity_players';
+const localPlayerMutations = new Map();
+
+function withLocalPlayerMutation(id, operation) {
+  const previous = localPlayerMutations.get(id) || Promise.resolve();
+  const next = previous.catch(() => {}).then(operation);
+  localPlayerMutations.set(id, next);
+  return next.finally(() => { if (localPlayerMutations.get(id) === next) localPlayerMutations.delete(id); });
+}
 
 function getDataDir() {
   return (
@@ -212,20 +220,27 @@ async function updatePlayer(player) {
   }
 
   await ensureDataDir();
-  await fs.writeFile(getPlayerPath(updated.id), JSON.stringify(updated), 'utf8');
+  const destination = getPlayerPath(updated.id);
+  const temporary = `${destination}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(updated), 'utf8');
+  await fs.rename(temporary, destination);
   return updated;
 }
 
 async function touchPlayer(id) {
-  const player = await readPlayer(id);
-  if (player === null) {
-    return;
-  }
-
-  await updatePlayer(player);
+  const touch = async () => {
+    const player = await readPlayer(id);
+    if (player !== null) await updatePlayer(player);
+  };
+  return hasPersistentConfig() ? touch() : withLocalPlayerMutation(id, touch);
 }
 
 async function mergeHighscores(id, primary, secondary) {
+  if (hasPersistentConfig()) return mergeHighscoresImpl(id, primary, secondary);
+  return withLocalPlayerMutation(id, () => mergeHighscoresImpl(id, primary, secondary));
+}
+
+async function mergeHighscoresImpl(id, primary, secondary) {
   if (!isValidPlayerId(id)) {
     return null;
   }

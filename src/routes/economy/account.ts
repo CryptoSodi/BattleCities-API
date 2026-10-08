@@ -65,6 +65,15 @@ export async function PUT(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid JSON' }, 400);
   }
 
+  if (body?.expectedPlayerId !== undefined) {
+    if (typeof body.expectedPlayerId !== 'string' || !/^ply-[a-z0-9-]+$/i.test(body.expectedPlayerId)) {
+      return json(request, { ok: false, error: 'Invalid expected player ID' }, 400);
+    }
+    if (body.expectedPlayerId !== player.id) {
+      return json(request, { ok: false, error: 'Player session changed' }, 409);
+    }
+  }
+
   let account;
   try {
     account = await economyStore.upsertAccountForPlayer(
