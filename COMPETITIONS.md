@@ -35,7 +35,8 @@ The pass expires at the season end and never credits a different season.
   remains retryable and `terminal: true` confirms that the unpaid transaction expired
   or failed. The relay may return HTTP 202 while confirmation is unresolved.
 - `GET /economy/wallet-balance` adds `skrBalance` and `skrBalanceAtomic` as exact
-  decimal strings. They are null until SKR is configured. Existing BATC fields remain.
+  decimal strings. They are null until SKR is configured. Existing BATC fields remain; on Devnet, the legacy mainnet BATC balance is zero
+and `skrBalance` reports the configured Devnet replacement token.
 
 ## Admin prices and prizes
 
@@ -64,8 +65,9 @@ not production defaults:
 
 Cycle prize ranks must be 1–10; season prize ranks can be 1–100, with no overlaps. Prize payments use SKR. Optional
 `shopSkrPrices` maps existing catalog item IDs to SKR prices. Null disables that
-item's SKR option. Signed checkout prices remain valid if settings change during
-checkout. Open competition policies refresh on the next worker tick or live-board
+item's SKR option. When no SKR price is configured, the Devnet catalog uses the
+legacy BATC item amounts for its 12 shop items; production has no default SKR prices.
+Signed checkout prices remain valid if settings change during checkout. Open competition policies refresh on the next worker tick or live-board
 request; closed competitions preserve their policy and allocations.
 
 ## Rankings and history

@@ -219,9 +219,8 @@ async function createQuote(player, input) {
   };
 }
 
-// Read-only mainnet balances for an authenticated wallet. This deliberately
-// does not use the economy store: SOL and BATC are owned by the wallet, not a
-// virtual game account.
+// Read-only wallet balances use the selected chain. Devnet's SKR replacement is
+// read below; the legacy BATC mint is mainnet-only and does not exist on Devnet.
 async function getWalletBalances(walletAddress) {
   let wallet;
   try {
@@ -230,14 +229,16 @@ async function getWalletBalances(walletAddress) {
     throw new Error('Invalid wallet address.');
   }
 
-  const tokenMint = new PublicKey(TOKEN_MINT);
+  const tokenMint = NETWORK === 'devnet' ? null : new PublicKey(TOKEN_MINT);
   const rpcUrl = String(
     process.env.BATTLECITY_SHOP_SOLANA_RPC_URL || PUBLIC_RPC_URL,
   ).trim();
   const connection = new Connection(rpcUrl, 'confirmed');
   const [lamports, tokenAccounts] = await Promise.all([
     connection.getBalance(wallet, 'confirmed'),
-    connection.getParsedTokenAccountsByOwner(wallet, { mint: tokenMint }),
+    tokenMint
+      ? connection.getParsedTokenAccountsByOwner(wallet, { mint: tokenMint })
+      : Promise.resolve({ value: [] }),
   ]);
   const tokenAmount = tokenAccounts.value.reduce((total, account) => {
     const amount = account.account.data.parsed?.info?.tokenAmount?.amount;

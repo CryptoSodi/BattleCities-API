@@ -1,13 +1,56 @@
 const store = require('../stores/competitionStore');
 const economy = require('../stores/economyStore');
 const skr = require('./skrToken');
+const solanaNetwork = require('../config/solanaNetwork');
+
+const DEVNET_SHOP_SKR_PRICES = Object.freeze({
+  'fuel-one': '150',
+  'fuel-five': '600',
+  'fuel-twenty': '1800',
+  shield: '300',
+  'base-defence': '375',
+  freeze: '450',
+  speed: '450',
+  upgrade: '675',
+  'zoom-out': '375',
+  wipeout: '600',
+  'extra-life': '525',
+  'starter-pack': '1200',
+});
+
+function isDevnet() {
+  return solanaNetwork.network() === 'devnet';
+}
 
 function defaults() {
   return { seasonPass: { enabled: false, skrPrice: null, solPrice: null },
     cycle: { enabled: false, prizes: [] }, season: { enabled: false, prizes: [] },
-    tradingSeason: { enabled: false, prizes: [] }, shopSkrPrices: {} };
+    tradingSeason: { enabled: false, prizes: [] },
+    shopSkrPrices: isDevnet() ? { ...DEVNET_SHOP_SKR_PRICES } : {} };
 }
-async function get() { return await store.getSettings() || defaults(); }
+
+async function get() {
+  const stored = await store.getSettings();
+  const value = defaults();
+  if (!stored) return value;
+
+  const storedPrices = stored.shopSkrPrices && typeof stored.shopSkrPrices === 'object'
+    ? stored.shopSkrPrices : {};
+  const hasConfiguredShopPrice = Object.values(storedPrices).some((amount) => amount !== null && amount !== undefined);
+  return {
+    ...value,
+    ...stored,
+    seasonPass: { ...value.seasonPass, ...(stored.seasonPass || {}) },
+    cycle: { ...value.cycle, ...(stored.cycle || {}) },
+    season: { ...value.season, ...(stored.season || {}) },
+    tradingSeason: { ...value.tradingSeason, ...(stored.tradingSeason || {}) },
+    shopSkrPrices: {
+      ...value.shopSkrPrices,
+      ...(isDevnet() && !hasConfiguredShopPrice ? {} : storedPrices),
+    },
+  };
+}
+
 function validate(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Settings must be an object.');
   const token = skr.config();
@@ -44,13 +87,16 @@ function validate(input) {
   }
   return value;
 }
+
 function price(value, decimals) {
   if (value === null || value === undefined) return null;
   skr.atomic(value, decimals);
   return String(value);
 }
+
 async function update(input, adminId) {
   const value = validate(input);
   return store.saveSettings(value, adminId);
 }
+
 module.exports = { defaults, get, validate, update };
