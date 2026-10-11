@@ -7,8 +7,8 @@ Firebase Authentication and Capacitor are not involved in player login.
 ## Deployment configuration
 
 - Firebase project: `battle-cities-84acd` (project number `295482350041`).
-- Android package: `com.battlecities.solanaconsole`.
-- Firebase Android app: `1:295482350041:android:8bc8bd10a22300e1fce1c8`.
+- Android package: `com.battlecities.game`.
+- Firebase Android app: `1:295482350041:android:5bbfcd1d539a6786fce1c8` (Battle Cities Android).
 - The native client creates channel `battle-cities-notifications`.
 - Enable the Firebase Cloud Messaging API for this Firebase project and grant the
   sending service account permission to send FCM messages (Firebase Cloud
@@ -25,6 +25,8 @@ Firebase Authentication and Capacitor are not involved in player login.
   `GET /api/admin/notifications` using an allowlisted wallet-admin session.
   `{ "configured": true, "enabledDevices": ... }` confirms local credential
   validation and device count; it does not prove Firebase IAM or device delivery.
+- The same status response reports `androidPackage` and `firebaseProjectId` so
+  the admin dashboard can display the deployed notification target.
 
 Keep credentials in the hosting platform's secret environment configuration.
 Never put private keys in Git, logs, Android assets, or `google-services.json`.

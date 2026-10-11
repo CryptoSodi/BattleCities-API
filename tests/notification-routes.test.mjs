@@ -33,7 +33,7 @@ beforeEach(async (t) => {
     assert.equal(url, 'https://fcm.googleapis.com/v1/projects/battle-cities-84acd/messages:send');
     const message = JSON.parse(init.body).message;
     assert.equal(message.notification, undefined); assert.equal(message.android.notification, undefined);
-    assert.equal(message.android.restricted_package_name, 'com.battlecities.solanaconsole');
+    assert.equal(message.android.restricted_package_name, 'com.battlecities.game');
     assert.ok(Object.values(message.data).every((value) => typeof value === 'string'));
     sends.push(message); return sendResponse(message);
   });
@@ -114,7 +114,10 @@ test('notification status and sending require an allowlisted wallet admin', asyn
     }
   }
   const admin = await wallet(adminWallet); await register(token('count'), 'granted'); await register(token('denied'), 'denied');
-  assert.deepEqual(await (await call('admin/notifications', 'GET', undefined, admin.cookie)).json(), { ok: true, configured: true, enabledDevices: 1 });
+  assert.deepEqual(await (await call('admin/notifications', 'GET', undefined, admin.cookie)).json(), {
+    ok: true, configured: true, enabledDevices: 1,
+    androidPackage: 'com.battlecities.game', firebaseProjectId: 'battle-cities-84acd',
+  });
   assert.equal(sends.length, 0);
 });
 
