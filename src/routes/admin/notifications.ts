@@ -17,6 +17,8 @@ export async function GET(request: Request): Promise<Response> {
   return createJsonResponse(request, {
     ok: true,
     configured: firebaseMessaging.isConfigured(),
+    androidPackage: firebaseMessaging.ANDROID_PACKAGE,
+    firebaseProjectId: firebaseMessaging.PROJECT_ID,
     enabledDevices: await pushDevices.getGrantedDeviceCount(),
   });
 }

@@ -27,7 +27,7 @@ test('Firebase push keeps service-account JWT authentication and reuses its toke
     assert.equal(message.token, 'test-device-token-1234567890');
     assert.deepEqual(message.data, { title: 'Title', body: 'Body', route: 'home', type: 'announcement' });
     assert.equal(message.notification, undefined);
-    assert.deepEqual(message.android, { priority: 'HIGH', restricted_package_name: 'com.battlecities.solanaconsole' });
+    assert.deepEqual(message.android, { priority: 'HIGH', restricted_package_name: 'com.battlecities.game' });
     return Response.json({ name: 'projects/battle-cities-84acd/messages/one' });
   });
   const messaging = require('../src/services/firebaseMessaging');
