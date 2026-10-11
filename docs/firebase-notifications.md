@@ -7,8 +7,8 @@ Firebase Authentication and Capacitor are not involved in player login.
 ## Deployment configuration
 
 - Firebase project: `battle-cities-84acd` (project number `295482350041`).
-- Android package: `com.battlecities.game`.
-- Firebase Android app: `1:295482350041:android:5bbfcd1d539a6786fce1c8` (Battle Cities Android).
+- Android package: `sol.battle.cities`.
+- Firebase Android app: `1:295482350041:android:f745e7401010eea5fce1c8` (Battle Cities Android).
 - The native client creates channel `battle-cities-notifications`.
 - Enable the Firebase Cloud Messaging API for this Firebase project and grant the
   sending service account permission to send FCM messages (Firebase Cloud
