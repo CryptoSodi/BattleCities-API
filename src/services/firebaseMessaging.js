@@ -3,7 +3,7 @@ const { normalizeNotification, isValidToken } = require('./notificationPayload')
 
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 const PROJECT_ID = 'battle-cities-84acd';
-const ANDROID_PACKAGE = 'com.battlecities.game';
+const ANDROID_PACKAGE = 'sol.battle.cities';
 
 let accessToken = null;
 let tokenRequest = null;
