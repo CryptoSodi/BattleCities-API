@@ -19,6 +19,7 @@ import * as economyConsumeFuel from '../routes/economy/consume-fuel';
 import * as economyConsumePowerup from '../routes/economy/consume-powerup';
 import * as economyDropClaim from '../routes/economy/dropClaim';
 import * as economyDropRoll from '../routes/economy/dropRoll';
+import * as magicblock from '../routes/magicblock';
 import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
 import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
@@ -89,6 +90,8 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'economy/fuel/consume': economyConsumeFuel,
   'economy/drops/claim': economyDropClaim,
   'economy/drops/roll': economyDropRoll,
+  'magicblock/session': magicblock,
+  'magicblock/drop': magicblock,
   'economy/ledger': economyLedger,
   'economy/purchase/quote': economyPurchaseQuote,
   'economy/purchase/verify': economyPurchaseVerify,

@@ -120,8 +120,14 @@ function validateReplay(value) {
   for (const event of value.events) {
     onlyKeys(event, ['tick', 'kind', 'value', 'slot', 'connected'], 'event');
     if (!integer(event.tick, 1, value.durationTicks) || event.tick < previousTick || !integer(event.slot, 0, 3) || typeof event.connected !== 'boolean') invalid('Invalid event ordering or player slot');
-    if (!['pickup', 'powerup', 'participant', 'begin'].includes(event.kind)) invalid('Invalid event kind');
-    if (event.kind === 'powerup' && !POWERS.has(event.value)) invalid('Invalid power-up event');
+    if (!['magicpickup', 'pickup', 'powerup', 'participant', 'begin'].includes(event.kind)) invalid('Invalid event kind');
+    if (event.kind === 'magicpickup') {
+      const p = typeof event.value === 'string' ? event.value.split('|') : [];
+      if (p.length !== 4 || !POWERS.has(p[0]) || !/^[1-9][0-9]*$/.test(p[1]) || !/^[1-9][0-9]*$/.test(p[2]) ||
+          !integer(Number(p[1]),32,value.map.field.widthTiles*64-33) || !integer(Number(p[2]),32,value.map.field.heightTiles*64-33) ||
+          Number(p[1])%32 || Number(p[2])%32 || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p[3])) invalid('Invalid MagicBlock drop');
+    }
+    if (event.kind === 'powerup'  && !POWERS.has(event.value)) invalid('Invalid power-up event');
     if (event.kind === 'pickup' && event.value !== null && !POWERS.has(event.value) && !['batc100', 'batc200'].includes(event.value)) invalid('Invalid pickup event');
     if (['participant', 'begin'].includes(event.kind) && event.value !== null) invalid('Invalid participant/begin value');
     if (value.mode === 'single' && (['participant', 'begin'].includes(event.kind) || event.slot !== 0)) invalid('Invalid single-player event');

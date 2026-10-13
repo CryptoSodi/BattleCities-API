@@ -12,6 +12,8 @@ export function OPTIONS(request: Request): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (request.headers.get('origin') === 'https://magic.battlecities.com')
+    return json(request, { error: 'Use the MagicBlock session drop endpoint.' }, 409);
   const player = await resolvePlayer(request);
   let body: any;
   try {
