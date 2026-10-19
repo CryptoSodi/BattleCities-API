@@ -72,6 +72,7 @@ function validateMap(map) {
   }
 }
 function validateConfig(config) {
+  if (config?.tankStatsVersion !== undefined && !integer(config.tankStatsVersion, 0, 1)) invalid('Unsupported tank stats version');
   if (!object(config) || !integer(config.playerTier, 0, 3) || !object(config.landDrone)) invalid('Invalid simulation config');
   for (const key of ['normalReload', 'upgradedReload', 'turretCooldown', 'turretReload']) {
     if (!number(config[key], 0.001, 60)) invalid(`Invalid config ${key}`);
@@ -120,7 +121,8 @@ function validateReplay(value) {
   for (const event of value.events) {
     onlyKeys(event, ['tick', 'kind', 'value', 'slot', 'connected'], 'event');
     if (!integer(event.tick, 1, value.durationTicks) || event.tick < previousTick || !integer(event.slot, 0, 3) || typeof event.connected !== 'boolean') invalid('Invalid event ordering or player slot');
-    if (!['magicpickup', 'pickup', 'powerup', 'participant', 'begin'].includes(event.kind)) invalid('Invalid event kind');
+    if (!['magicpickup', 'pickup', 'powerup', 'participant', 'begin', 'tank'].includes(event.kind)) invalid('Invalid event kind');
+    if (event.kind === 'tank' && (value.config.tankStatsVersion !== 1 || value.mode === 'single' || typeof event.value !== 'string' || !/^[0-3]$/.test(event.value))) invalid('Invalid tank selection');
     if (event.kind === 'magicpickup') {
       const p = typeof event.value === 'string' ? event.value.split('|') : [];
       if (p.length !== 4 || !POWERS.has(p[0]) || !/^[1-9][0-9]*$/.test(p[1]) || !/^[1-9][0-9]*$/.test(p[2]) ||
