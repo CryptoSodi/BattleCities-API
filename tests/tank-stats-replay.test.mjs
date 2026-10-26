@@ -32,3 +32,17 @@ test('unsupported profiles and invalid tank selections are rejected',()=>{
     r.events=[{tick:1,slot:0,connected:false,kind:'tank',value:'2'}];assert.throws(()=>validateReplay(r));
   }
 });
+
+test('new power-up events and versioned drop pools validate without weakening unknown-type rejection',()=>{
+  for(const type of ['healmax','heal2','rapid','rapidlong']){
+    const r=replay();r.config.powerupRosterVersion=1;r.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:type}];
+    assert.doesNotThrow(()=>validateReplay(r));
+  }
+  for(const version of [-1,2,'1',null]){const r=replay();r.config.powerupRosterVersion=version;assert.throws(()=>validateReplay(r));}
+  const forged=replay();forged.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:'infinite-health'}];assert.throws(()=>validateReplay(forged));
+});
+
+test('Wipeout damage rule is versioned and older recordings remain valid',()=>{
+  for(const version of [0,1]){const r=replay();r.config.wipeoutDamageVersion=version;r.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:'wipeout'}];assert.doesNotThrow(()=>validateReplay(r));}
+  for(const version of [-1,2,'1',null]){const r=replay();r.config.wipeoutDamageVersion=version;assert.throws(()=>validateReplay(r));}
+});

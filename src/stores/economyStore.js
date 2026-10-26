@@ -11,15 +11,16 @@ const localMutations = new Map();
 // PostgreSQL mutations lock the account row inside the shared transaction.
 // Local development serializes the complete balance/receipt operation per player.
 function withAccountMutation(player, operation) {
-  if (hasPersistentConfig()) return database.withTransaction(async () => operation(await lockAccountForFuelMutation(player)));
+  if (hasPersistentConfig()) return database.withTransaction(async () => operation(await refillFuel(await lockAccountForFuelMutation(player))));
   const previous = localMutations.get(player.id) || Promise.resolve();
-  const next = previous.catch(() => {}).then(async () => operation(await ensureAccountForPlayer(player)));
+  const next = previous.catch(() => {}).then(async () => operation(await refillFuel(await ensureStoredAccountForPlayer(player))));
   localMutations.set(player.id, next);
   return next.finally(() => { if (localMutations.get(player.id) === next) localMutations.delete(player.id); });
 }
 const SHOP_STARTING_TOKEN_BALANCE = 1000;
 const SHOP_STARTING_SOL_BALANCE = 1.25;
 const SHOP_STARTING_FUEL_BALANCE = 5;
+const FUEL_REFILL_INTERVAL_MS = 30 * 60 * 1000;
 const SHOP_CATALOG = {
   'fuel-one': { price: 150, solPrice: 0.01, fuel: 1 },
   'fuel-five': { price: 600, solPrice: 0.04, fuel: 5 },
@@ -32,6 +33,10 @@ const SHOP_CATALOG = {
   'zoom-out': { price: 375, solPrice: 0.025, inventory: { 'zoom-out': 1 } },
   wipeout: { price: 600, solPrice: 0.04, inventory: { wipeout: 1 } },
   'extra-life': { price: 525, solPrice: 0.035, inventory: { 'extra-life': 1 } },
+  'max-healer': { price: 450, solPrice: 0.02, inventory: { 'max-healer': 1 } },
+  'health-healer': { price: 450, solPrice: 0.01, inventory: { 'health-healer': 1 } },
+  'rapid-shooter': { price: 450, solPrice: 0.01, inventory: { 'rapid-shooter': 1 } },
+  'rapid-shooter-long': { price: 900, solPrice: 0.02, inventory: { 'rapid-shooter-long': 1 } },
   'starter-pack': {
     price: 1200,
     solPrice: 0.08,
@@ -48,6 +53,7 @@ const INVENTORY_KEYS = [
   'zoom-out',
   'wipeout',
   'extra-life',
+  'max-healer', 'health-healer', 'rapid-shooter', 'rapid-shooter-long',
 ];
 const ACTIVE_POWERUP_TYPES = {
   shield: 'shield',
@@ -57,6 +63,9 @@ const ACTIVE_POWERUP_TYPES = {
   upgrade: 'upgrade',
   'zoom-out': 'zoomout',
   wipeout: 'wipeout',
+  'extra-life': 'life',
+  'max-healer': 'healmax', 'health-healer': 'heal2',
+  'rapid-shooter': 'rapid', 'rapid-shooter-long': 'rapidlong',
 };
 
 function getDataDir() {
@@ -97,7 +106,7 @@ async function readAccount(playerId) {
       `
         SELECT player_id, provider, wallet_address, token_balance,
           sol_balance, fuel_balance, inventory_json, loadout_json,
-          created_at, updated_at
+          created_at, updated_at, fuel_refill_at
         FROM ${TABLE_NAME}
         WHERE player_id = $1
         LIMIT 1
@@ -120,7 +129,33 @@ async function readAccount(playerId) {
   }
 }
 
+// Materialize elapsed intervals on every authenticated account read or mutation.
+// The row lock also protects the refill from simultaneous logins and match starts.
 async function ensureAccountForPlayer(player) {
+  if (!isValidPlayer(player)) throw new Error('Invalid player');
+  return withAccountMutation(player, async account => account);
+}
+
+async function refillFuel(account) {
+  const now = Date.now();
+  const previous = Date.parse(account.fuelRefillAt);
+  const intervals = Math.floor((now - previous) / FUEL_REFILL_INTERVAL_MS);
+  if (intervals < 1) return account;
+  const amount = Math.max(0, SHOP_STARTING_FUEL_BALANCE - account.fuelBalance);
+  // Advance even when full: unused intervals never become banked grants.
+  account.fuelRefillAt = new Date(previous + intervals * FUEL_REFILL_INTERVAL_MS).toISOString();
+  account.fuelBalance += amount;
+  account.updatedAt = new Date(now).toISOString();
+  await writeAccount(account);
+  if (amount > 0) await ledgerStore.appendEntries({
+    playerId: account.playerId, walletAddress: account.walletAddress,
+    currency: 'fuel', amount, reason: 'thirty-minute-fuel-refill',
+    sourceType: 'fuel-refill', sourceId: account.fuelRefillAt,
+  });
+  return account;
+}
+
+async function ensureStoredAccountForPlayer(player) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
   }
@@ -141,14 +176,15 @@ async function ensureAccountForPlayer(player) {
     loadout: {},
     createdAt: now,
     updatedAt: now,
+    fuelRefillAt: now,
   });
 
   if (hasPersistentConfig()) {
     await ensureSchema();
     await getPgPool().query(`INSERT INTO ${TABLE_NAME}
       (player_id, provider, wallet_address, token_balance, sol_balance, fuel_balance,
-       inventory_json, loadout_json, created_at, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$9)
+       inventory_json, loadout_json, created_at, updated_at, fuel_refill_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$9,$9)
       ON CONFLICT (player_id) DO NOTHING`, [account.playerId, account.provider, account.walletAddress,
       account.tokenBalance, account.solBalance, account.fuelBalance, '{}', '{}', now]);
   } else {
@@ -393,7 +429,7 @@ async function creditFuel(player, amount, context = {}) {
           WHERE player_id = $1
           RETURNING player_id, provider, wallet_address, token_balance,
             sol_balance, fuel_balance, inventory_json, loadout_json,
-            created_at, updated_at
+            created_at, updated_at, fuel_refill_at
         `,
         [player.id, safeAmount, new Date().toISOString()],
       );
@@ -424,7 +460,7 @@ async function lockAccountForFuelMutation(player) {
     `
       SELECT player_id, provider, wallet_address, token_balance,
         sol_balance, fuel_balance, inventory_json, loadout_json,
-        created_at, updated_at
+        created_at, updated_at, fuel_refill_at
       FROM ${TABLE_NAME}
       WHERE player_id = $1
       FOR UPDATE
@@ -432,12 +468,12 @@ async function lockAccountForFuelMutation(player) {
     [player.id],
   );
   if (result.rowCount === 0) {
-    await ensureAccountForPlayer(player);
+    await ensureStoredAccountForPlayer(player);
     result = await getPgPool().query(
       `
         SELECT player_id, provider, wallet_address, token_balance,
           sol_balance, fuel_balance, inventory_json, loadout_json,
-          created_at, updated_at
+          created_at, updated_at, fuel_refill_at
         FROM ${TABLE_NAME}
         WHERE player_id = $1
         FOR UPDATE
@@ -466,9 +502,10 @@ async function writeAccount(account) {
             inventory_json,
             loadout_json,
             created_at,
-            updated_at
+            updated_at,
+            fuel_refill_at
           )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
         ON CONFLICT (player_id) DO UPDATE SET
           provider = EXCLUDED.provider,
           wallet_address = EXCLUDED.wallet_address,
@@ -477,7 +514,8 @@ async function writeAccount(account) {
           fuel_balance = EXCLUDED.fuel_balance,
           inventory_json = EXCLUDED.inventory_json,
           loadout_json = EXCLUDED.loadout_json,
-          updated_at = EXCLUDED.updated_at
+          updated_at = EXCLUDED.updated_at,
+          fuel_refill_at = EXCLUDED.fuel_refill_at
       `,
       [
         normalized.playerId,
@@ -490,6 +528,7 @@ async function writeAccount(account) {
         JSON.stringify(normalized.loadout),
         normalized.createdAt,
         normalized.updatedAt,
+        normalized.fuelRefillAt,
       ],
     );
     return;
@@ -528,6 +567,7 @@ function fromRow(row) {
     fuelBalance: Number(row.fuel_balance || 0),
     inventory: parseJson(row.inventory_json, {}),
     loadout: parseJson(row.loadout_json, {}),
+    fuelRefillAt: new Date(row.fuel_refill_at).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
@@ -546,6 +586,8 @@ function normalizeAccount(value) {
     fuelBalance: normalizeInteger(account.fuelBalance, 0),
     inventory: normalizeObject(account.inventory),
     loadout: normalizeObject(account.loadout),
+    fuelRefillAt: Number.isFinite(Date.parse(account.fuelRefillAt)) ? account.fuelRefillAt
+      : (Number.isFinite(Date.parse(account.createdAt)) ? account.createdAt : now),
     createdAt: typeof account.createdAt === 'string' ? account.createdAt : now,
     updatedAt: typeof account.updatedAt === 'string' ? account.updatedAt : now,
   };

@@ -24,14 +24,15 @@ const REGULAR_DROP_TYPES = Object.freeze([
   'upgrade',
   'zoomout',
   'wipeout',
+  'healmax', 'heal2', 'rapid', 'rapidlong',
 ]);
 const CONFIRMED_STATUSES = new Set(['confirmed', 'finalized']);
 let cachedKeypair = null;
 let cachedKeypairPath = null;
 
-async function roll(player, requestId, levelNumber) {
+async function roll(player, requestId, levelNumber, powerupRosterVersion = 0) {
   const config = readConfig();
-  const regularType = randomRegularDropType();
+  const regularType = randomRegularDropType(powerupRosterVersion);
   if (!config.enabled || !storageConfig.hasDatabaseConfig()) {
     return { dropType: regularType, reward: null };
   }
@@ -294,8 +295,8 @@ function assertConfigured(config) {
   }
 }
 
-function randomRegularDropType() {
-  return REGULAR_DROP_TYPES[crypto.randomInt(REGULAR_DROP_TYPES.length)];
+function randomRegularDropType(powerupRosterVersion) {
+  return REGULAR_DROP_TYPES[crypto.randomInt(powerupRosterVersion === 1 ? REGULAR_DROP_TYPES.length : 8)];
 }
 
 function safePublicKey(value) {

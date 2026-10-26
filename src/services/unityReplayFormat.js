@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const FORMAT = 'battlecities-unity-input-v1';
 const LIMITS = Object.freeze({ maxBytes: 2 * 1024 * 1024, maxTicks: 108000, maxCheckpoints: 1801, maxEvents: 4096, maxInputs: 108000 });
-const POWERS = new Set(['shield', 'upgrade', 'speed', 'life', 'freeze', 'wipeout', 'zoomout', 'defence']);
+const POWERS = new Set(['shield', 'upgrade', 'speed', 'life', 'freeze', 'wipeout', 'zoomout', 'defence', 'healmax', 'heal2', 'rapid', 'rapidlong']);
 const MODES = new Set(['single', 'coop', 'versus']);
 const HASH = /^[a-f0-9]{64}$/;
 
@@ -72,6 +72,8 @@ function validateMap(map) {
   }
 }
 function validateConfig(config) {
+  if (config?.powerupRosterVersion !== undefined && !integer(config.powerupRosterVersion, 0, 1)) invalid('Unsupported power-up roster version');
+  if (config?.wipeoutDamageVersion !== undefined && !integer(config.wipeoutDamageVersion, 0, 1)) invalid('Unsupported Wipeout damage version');
   if (config?.tankStatsVersion !== undefined && !integer(config.tankStatsVersion, 0, 1)) invalid('Unsupported tank stats version');
   if (!object(config) || !integer(config.playerTier, 0, 3) || !object(config.landDrone)) invalid('Invalid simulation config');
   for (const key of ['normalReload', 'upgradedReload', 'turretCooldown', 'turretReload']) {

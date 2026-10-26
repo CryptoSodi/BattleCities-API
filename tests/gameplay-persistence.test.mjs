@@ -113,9 +113,12 @@ test('account GET cannot overwrite a concurrent debit and partial PUT preserves 
   });
   const pendingGet = call('economy/account', 'GET', undefined, cookie);
   await reading;
-  const debit = await economy.consumeFuelForPlayer(player, crypto.randomUUID(), 1);
+  // Reads now share the account lock because they may apply an elapsed refill.
+  const pendingDebit = economy.consumeFuelForPlayer(player, crypto.randomUUID(), 1);
+  release();
+  const [get, debit] = await Promise.all([pendingGet, pendingDebit]);
+  assert.equal(get.status, 200);
   assert.equal(debit.account.fuelBalance, 3);
-  release(); assert.equal((await pendingGet).status, 200);
   assert.equal((await economy.readAccount(player.id)).fuelBalance, 3);
   const update = await call('economy/account', 'PUT', { fuelBalance: 2 }, cookie);
   assert.equal(update.status, 200);

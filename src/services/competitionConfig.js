@@ -15,6 +15,8 @@ const DEVNET_SHOP_SKR_PRICES = Object.freeze({
   'zoom-out': '375',
   wipeout: '600',
   'extra-life': '525',
+  'max-healer': '450', 'health-healer': '450',
+  'rapid-shooter': '450', 'rapid-shooter-long': '900',
   'starter-pack': '1200',
 });
 
@@ -26,7 +28,7 @@ function defaults() {
   return { seasonPass: { enabled: false, skrPrice: null, solPrice: null },
     cycle: { enabled: false, prizes: [] }, season: { enabled: false, prizes: [] },
     tradingSeason: { enabled: false, prizes: [] },
-    shopSkrPrices: isDevnet() ? { ...DEVNET_SHOP_SKR_PRICES } : {} };
+    shopSkrPrices: isDevnet() ? { ...DEVNET_SHOP_SKR_PRICES } : { 'max-healer': '450', 'health-healer': '450', 'rapid-shooter': '450', 'rapid-shooter-long': '900' } };
 }
 
 async function get() {

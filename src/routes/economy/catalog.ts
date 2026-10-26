@@ -14,7 +14,7 @@ export async function GET(request: Request): Promise<Response> {
   const player = await resolveSessionPlayer(request);
   const pass = player ? await competitions.getPass(player.id, season.id) : null;
   const itemIds = ['fuel-one','fuel-five','fuel-twenty','shield','base-defence','freeze','speed',
-    'upgrade','zoom-out','wipeout','extra-life','starter-pack'];
+    'upgrade','zoom-out','wipeout','extra-life','max-healer','health-healer','rapid-shooter','rapid-shooter-long','starter-pack'];
   return createJsonResponse(request, {
     currency: { skr: skr.config(), sol: { decimals: 9, network: solanaNetwork.network() } },
     items: itemIds.map((id) => { const item = economy.getShopCatalogItem(id); return {
