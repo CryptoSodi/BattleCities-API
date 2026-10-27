@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '033_fuel_refill';
+const REQUIRED_MIGRATION = '034_play_shop_currency';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

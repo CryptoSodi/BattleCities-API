@@ -21,6 +21,8 @@ const economyStore = require('../stores/economyStore');
 const shopPaymentStore = require('../stores/shopPaymentStore');
 const solanaRpc = require('./solanaRpc');
 const skrToken = require('./skrToken');
+const playToken = require('./playToken');
+const tokenPricing = require('./shopTokenPricing');
 const competitionConfig = require('./competitionConfig');
 const competitionStore = require('../stores/competitionStore');
 const seasonStore = require('../stores/seasonStore');
@@ -75,28 +77,38 @@ function assertConfigured(config) {
   }
 }
 
+function paymentToken(currency, config) {
+  if (currency === 'skr') return skrToken.requireConfig();
+  if (currency === 'play') return playToken.requireConfig();
+  return { mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS };
+}
+
 async function createQuote(player, input) {
   const config = getConfig();
   assertConfigured(config);
   const itemId = String(input?.itemId || '');
   const currency = input?.currency || 'token';
-  if (!['sol', 'token', 'skr'].includes(currency)) throw new Error('Invalid payment currency.');
+  if (!['sol', 'token', 'skr', 'play'].includes(currency)) throw new Error('Invalid payment currency.');
   const settings = await competitionConfig.get();
   let season = null;
   let item = economyStore.getShopCatalogItem(itemId);
   if (itemId === 'season-pass') {
     season = await seasonStore.getCurrentSeason();
     if (!settings.seasonPass.enabled) throw new Error('Season pass sales are disabled.');
-    if (currency === 'token') throw new Error('Season passes support SKR or SOL.');
+    if (currency === 'token') throw new Error('Season passes support SKR, PLAY or SOL.');
     if (input.seasonId && input.seasonId !== season.id) throw new Error('Season has changed; refresh the shop.');
     if (await competitionStore.getPass(player.id, season.id)) throw new Error('Season pass already owned.');
     if (Date.parse(season.endsAt) - Date.now() < QUOTE_TTL_MS + MAX_CLOCK_SKEW_MS) throw new Error('Season pass checkout has closed for this season.');
     item = { ...settings.seasonPass };
-  } else if (item) item.skrPrice = settings.shopSkrPrices[itemId] ?? null;
+  } else if (item) {
+    item.skrPrice = settings.shopSkrPrices[itemId] ?? null;
+    if (Object.hasOwn(settings.shopSolPrices || {}, itemId)) item.solPrice = settings.shopSolPrices[itemId];
+  }
   if (item === null) throw new Error('ITEM NOT FOUND');
-  const token = currency === 'skr' ? skrToken.requireConfig() : {
-    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
-  };
+  if (currency === 'play' || currency === 'skr') {
+    item[currency + 'Price'] = await tokenPricing.price(settings, itemId, currency, item.solPrice);
+  }
+  const token = paymentToken(currency, config);
   const tokenMint = new PublicKey(token.mint), tokenProgram = new PublicKey(token.programId);
 
   let wallet;
@@ -108,7 +120,8 @@ async function createQuote(player, input) {
   if (player.provider !== 'wallet' || wallet.toBase58() !== player.walletAddress) throw new Error('Payment wallet must match the authenticated wallet.');
 
   const amountAtomic = currency === 'sol' ? skrToken.atomic(item.solPrice, 9)
-    : currency === 'skr' ? skrToken.atomic(item.skrPrice, token.decimals) : skrToken.atomic(item.price, TOKEN_DECIMALS);
+    : currency === 'skr' ? skrToken.atomic(item.skrPrice, token.decimals)
+    : currency === 'play' ? skrToken.atomic(item.playPrice, token.decimals) : skrToken.atomic(item.price, TOKEN_DECIMALS);
   const issuedAt = Date.now();
   const payload = {
     v: 2,
@@ -128,7 +141,7 @@ async function createQuote(player, input) {
     expiresAt: issuedAt + QUOTE_TTL_MS,
   };
   const connection = new Connection(config.rpcUrl, 'confirmed');
-  if (currency === 'skr') await skrToken.validateMint(connection, token);
+  if (currency === 'skr' || currency === 'play') await skrToken.validateMint(connection, token);
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   const transaction = new Transaction({ feePayer: wallet, recentBlockhash: blockhash });
   transaction.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }));
@@ -194,7 +207,7 @@ async function createQuote(player, input) {
   if (simulation.value.err) {
     throw new Error(currency === 'sol'
       ? 'The payment could not be prepared. Check your SOL balance.'
-      : `The payment could not be prepared. Check your ${currency === 'skr' ? 'SKR' : 'BATC'} and SOL balances.`);
+      : `The payment could not be prepared. Check your ${currency === 'skr' ? 'SKR' : currency === 'play' ? 'PLAY' : 'BATC'} and SOL balances.`);
   }
 
   // Bind the quote to the exact transaction message before the wallet signs it.
@@ -250,6 +263,12 @@ async function getWalletBalances(walletAddress) {
     const accounts = await connection.getParsedTokenAccountsByOwner(wallet, { mint: new PublicKey(skr.mint) });
     skrAmount = accounts.value.reduce((total, a) => total + BigInt(a.account.data.parsed?.info?.tokenAmount?.amount || '0'), 0n);
   }
+  const play = playToken.config();
+  let playAmount = null;
+  if (play) {
+    const accounts = await connection.getParsedTokenAccountsByOwner(wallet, { mint: new PublicKey(play.mint) });
+    playAmount = accounts.value.reduce((total, a) => total + BigInt(a.account.data.parsed?.info?.tokenAmount?.amount || '0'), 0n);
+  }
 
   return {
     walletAddress: wallet.toBase58(),
@@ -258,6 +277,9 @@ async function getWalletBalances(walletAddress) {
     skrBalance: skrAmount === null ? null : formatAtomic(skrAmount, skr.decimals),
     skrBalanceAtomic: skrAmount?.toString() ?? null,
     skrMint: skr?.mint || null,
+    playBalance: playAmount === null ? null : formatAtomic(playAmount, play.decimals),
+    playBalanceAtomic: playAmount?.toString() ?? null,
+    playMint: play?.mint || null,
   };
 }
 
@@ -277,9 +299,7 @@ async function verifyPurchase(player, input) {
       account: economyStore.toPublicAccount(await economyStore.readAccount(player.id)),
       seasonPass: quote.seasonId ? await competitionStore.getPass(player.id, quote.seasonId) : null };
   }
-  const token = quote.currency === 'skr' ? skrToken.requireConfig() : {
-    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
-  };
+  const token = paymentToken(quote.currency, config);
   const paymentConfig = { ...config, tokenMint: new PublicKey(token.mint), tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals };
   validateQuote(quote, paymentConfig, player);
   const transaction = await solanaRpc.getTransaction(signature, config.rpcUrl);
@@ -315,7 +335,7 @@ async function verifyPurchase(player, input) {
         quote.currency,
         signature,
         quote.walletAddress,
-        { [quote.currency === 'sol' ? 'solPrice' : quote.currency === 'skr' ? 'skrPrice' : 'price']:
+        { [quote.currency === 'sol' ? 'solPrice' : quote.currency === 'skr' ? 'skrPrice' : quote.currency === 'play' ? 'playPrice' : 'price']:
           Number(formatAtomic(BigInt(quote.amountAtomic), quote.currency === 'sol' ? 9 : token.decimals)) },
       );
     }
@@ -339,7 +359,8 @@ function validateQuote(quote, config, player) {
     || quote.treasury !== config.treasury.toBase58()
     || quote.tokenMint !== config.tokenMint.toBase58()
     || (!economyStore.getShopCatalogItem(quote.itemId) && !(quote.v === 2 && quote.itemId === 'season-pass' && /^season-\d+$/.test(quote.seasonId)))
-    || !['sol', 'token', 'skr'].includes(quote.currency)
+    || !['sol', 'token', 'skr', 'play'].includes(quote.currency)
+    || (quote.currency === 'play' && quote.v !== 2)
     || (quote.itemId === 'season-pass' && quote.currency === 'token')
     || !/^\d+$/.test(String(quote.amountAtomic || ''))
     || !Number.isFinite(quote.issuedAt)
@@ -376,9 +397,7 @@ async function submitPurchase(player, input, connection = null) {
   const config = getConfig();
   assertConfigured(config);
   const quote = verifyQuoteToken(input?.quoteToken, config.quoteSecret);
-  const token = quote.currency === 'skr' ? skrToken.requireConfig() : {
-    mint: config.tokenMint.toBase58(), programId: TOKEN_2022_PROGRAM_ID.toBase58(), decimals: TOKEN_DECIMALS,
-  };
+  const token = paymentToken(quote.currency, config);
   validateQuote(quote, { ...config, tokenMint: new PublicKey(token.mint),
     tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals }, player);
   const encoded = input?.signedTransaction;

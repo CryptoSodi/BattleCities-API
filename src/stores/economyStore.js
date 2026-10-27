@@ -389,8 +389,8 @@ async function appendPurchaseLedgerEntries(
   const entries = [
     {
       ...base,
-      currency: paymentCurrency === 'sol' ? 'sol' : paymentCurrency === 'skr' ? 'skr' : 'token',
-      amount: paymentCurrency === 'sol' ? -item.solPrice : paymentCurrency === 'skr' ? -item.skrPrice : -item.price,
+      currency: ['sol', 'skr', 'play'].includes(paymentCurrency) ? paymentCurrency : 'token',
+      amount: paymentCurrency === 'sol' ? -item.solPrice : paymentCurrency === 'skr' ? -item.skrPrice : paymentCurrency === 'play' ? -item.playPrice : -item.price,
     },
   ];
 
