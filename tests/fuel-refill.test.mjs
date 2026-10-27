@@ -22,6 +22,8 @@ test('initial fuel, exact refill boundary, cap, offline intervals and concurrent
     let now = start;
     Date.now = () => now;
     assert.equal(initial.fuelBalance, 5);
+    assert.equal(initial.tokenBalance, 0);
+    assert.equal(initial.solBalance, 0);
     await economy.consumeFuelForPlayer(player, crypto.randomUUID(), 2);
     assert.equal((await economy.ensureAccountForPlayer(player)).fuelBalance, 2);
     now = start + 30 * 60 * 1000 - 1;
@@ -55,6 +57,15 @@ test('initial fuel, exact refill boundary, cap, offline intervals and concurrent
     delete legacy.fuelRefillAt;
     await fs.writeFile(path.join(process.env.BATTLECITY_ECONOMY_DIR, `${legacy.playerId}.json`), JSON.stringify(legacy));
     assert.equal((await economy.ensureAccountForPlayer({ ...player, id: legacy.playerId })).fuelBalance, 5);
+    const afterRefills = await economy.ensureAccountForPlayer(player);
+    assert.equal(afterRefills.tokenBalance, 0);
+    assert.equal(afterRefills.solBalance, 0);
+    // Re-reading an existing account preserves its stored currency balances.
+    const funded = { ...initial, playerId: `ply-${crypto.randomUUID()}`, tokenBalance: 23, solBalance: 0.5 };
+    await fs.writeFile(path.join(process.env.BATTLECITY_ECONOMY_DIR, `${funded.playerId}.json`), JSON.stringify(funded));
+    const preserved = await economy.ensureAccountForPlayer({ ...player, id: funded.playerId });
+    assert.equal(preserved.tokenBalance, 23);
+    assert.equal(preserved.solBalance, 0.5);
   } finally {
     Date.now = realNow;
     await fs.rm(root, { recursive: true, force: true });

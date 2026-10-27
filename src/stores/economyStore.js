@@ -17,8 +17,9 @@ function withAccountMutation(player, operation) {
   localMutations.set(player.id, next);
   return next.finally(() => { if (localMutations.get(player.id) === next) localMutations.delete(player.id); });
 }
-const SHOP_STARTING_TOKEN_BALANCE = 1000;
-const SHOP_STARTING_SOL_BALANCE = 1.25;
+// Currency balances require real funds; account creation only grants fuel.
+const SHOP_STARTING_TOKEN_BALANCE = 0;
+const SHOP_STARTING_SOL_BALANCE = 0;
 const SHOP_STARTING_FUEL_BALANCE = 5;
 const FUEL_REFILL_INTERVAL_MS = 30 * 60 * 1000;
 const SHOP_CATALOG = {
