@@ -283,8 +283,7 @@ async function getPlayerStats(playerId) {
 }
 
 // Rank + totals of a single player in a scope; null when they have no
-// results there. Rank counts players with strictly more points, mirroring
-// the leaderboard's ordering.
+// results there. Use the same points/player-id ordering as the displayed board.
 async function getPlayerRank(playerId, seasonId) {
   if (!isValidPlayerId(playerId)) {
     return null;
@@ -334,7 +333,8 @@ async function getPlayerRank(playerId, seasonId) {
   }
 
   const better = totals.filter(
-    (row) => row.totalPoints > me.totalPoints,
+    (row) => row.totalPoints > me.totalPoints
+      || (row.totalPoints === me.totalPoints && row.playerId < me.playerId),
   ).length;
 
   return {

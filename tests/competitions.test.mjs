@@ -56,6 +56,26 @@ test('admin settings validate prices, token precision, and overlapping prize tie
   assert.equal(skr.atomic('9000000000.123456', 6), 9000000000123456n);
 });
 
+test('personal ranks match displayed positions when scores tie in all-time and season standings', async () => {
+  for (const suffix of ['c','b','a']) {
+    const id='ply-tie-'+suffix;
+    await record('tie-'+suffix,{playerId:id,displayName:'Tied '+suffix,gamePoints:suffix==='a'?200:100});
+    await store.grantPass(id,season,'tie-pass-'+suffix,'2026-10-05T12:00:00Z');
+  }
+  for (const scope of [null,season.id]) {
+    const board=await matches.getLeaderboard(scope,20);
+    assert.deepEqual(board.map(row=>[row.playerId,row.rank]),[['ply-tie-a',1],['ply-tie-b',2],['ply-tie-c',3]]);
+    for (const row of board) {
+      const personal=await matches.getPlayerRank(row.playerId,scope);
+      assert.equal(personal.rank,row.rank);
+      assert.equal(personal.totalPoints,row.totalPoints);
+      assert.equal(personal.matches,row.matches);
+    }
+  }
+  const cycle=await matches.getLeaderboardInWindow(null,'2026-10-05T10:00:00Z','2026-10-05T10:30:00Z',10,'ply-tie-c');
+  assert.equal(cycle.find(row=>row.playerId==='ply-tie-c').rank,3);
+});
+
 test('buying a pass includes every eligible earlier season match and preserves cycle eligibility', async () => {
   await record('old', { createdAt: '2026-10-01T00:01:00.000Z' });
   await record('recent');
