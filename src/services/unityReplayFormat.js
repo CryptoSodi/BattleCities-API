@@ -72,9 +72,19 @@ function validateMap(map) {
   }
 }
 function validateConfig(config) {
+  if (config?.campaignStart !== undefined) {
+    if (!Array.isArray(config.campaignStart) || config.campaignStart.length > 4) invalid('Invalid campaign carry state');
+    const slots = new Set();
+    for (const state of config.campaignStart) {
+      if (!object(state) || !integer(state.slot, -1, 3) || slots.has(state.slot) || !integer(state.lives, 0, 999) ||
+          !integer(state.tier, 0, 3) || !integer(state.startingTier, 0, 3) || !integer(state.health, 0, 5) || !integer(state.upgrades, 0, 3) ||
+          !number(state.speedBoost, 0, 120) || !number(state.rapidFire, 0, 120)) invalid('Invalid campaign tank state');
+      slots.add(state.slot);
+    }
+  }
   if (config?.powerupRosterVersion !== undefined && !integer(config.powerupRosterVersion, 0, 1)) invalid('Unsupported power-up roster version');
   if (config?.wipeoutDamageVersion !== undefined && !integer(config.wipeoutDamageVersion, 0, 1)) invalid('Unsupported Wipeout damage version');
-  if (config?.tankStatsVersion !== undefined && !integer(config.tankStatsVersion, 0, 1)) invalid('Unsupported tank stats version');
+  if (config?.tankStatsVersion !== undefined && !integer(config.tankStatsVersion, 0, 2)) invalid('Unsupported tank stats version');
   if (!object(config) || !integer(config.playerTier, 0, 3) || !object(config.landDrone)) invalid('Invalid simulation config');
   for (const key of ['normalReload', 'upgradedReload', 'turretCooldown', 'turretReload']) {
     if (!number(config[key], 0.001, 60)) invalid(`Invalid config ${key}`);
@@ -124,7 +134,7 @@ function validateReplay(value) {
     onlyKeys(event, ['tick', 'kind', 'value', 'slot', 'connected'], 'event');
     if (!integer(event.tick, 1, value.durationTicks) || event.tick < previousTick || !integer(event.slot, 0, 3) || typeof event.connected !== 'boolean') invalid('Invalid event ordering or player slot');
     if (!['magicpickup', 'pickup', 'powerup', 'participant', 'begin', 'tank'].includes(event.kind)) invalid('Invalid event kind');
-    if (event.kind === 'tank' && (value.config.tankStatsVersion !== 1 || value.mode === 'single' || typeof event.value !== 'string' || !/^[0-3]$/.test(event.value))) invalid('Invalid tank selection');
+    if (event.kind === 'tank' && (![1, 2].includes(value.config.tankStatsVersion) || value.mode === 'single' || typeof event.value !== 'string' || !/^[0-3]$/.test(event.value))) invalid('Invalid tank selection');
     if (event.kind === 'magicpickup') {
       const p = typeof event.value === 'string' ? event.value.split('|') : [];
       if (p.length !== 4 || !POWERS.has(p[0]) || !/^[1-9][0-9]*$/.test(p[1]) || !/^[1-9][0-9]*$/.test(p[2]) ||

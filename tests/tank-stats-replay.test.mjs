@@ -16,6 +16,7 @@ function replay(mode='single') {
 test('legacy and new tank profile recordings are accepted',()=>{
   const old=replay();assert.doesNotThrow(()=>validateReplay(old));
   const current=replay();current.config.tankStatsVersion=1;assert.doesNotThrow(()=>validateReplay(current));
+  const promoted=replay();promoted.config.tankStatsVersion=2;assert.doesNotThrow(()=>validateReplay(promoted));
   for(let tier=0;tier<4;tier++) {
     const coop=replay('coop');coop.config.tankStatsVersion=1;
     coop.events=[{tick:1,slot:0,connected:false,kind:'tank',value:String(tier)}];
@@ -23,7 +24,7 @@ test('legacy and new tank profile recordings are accepted',()=>{
   }
 });
 test('unsupported profiles and invalid tank selections are rejected',()=>{
-  for(const version of [-1,2,'1',null]) {const r=replay();r.config.tankStatsVersion=version;assert.throws(()=>validateReplay(r));}
+  for(const version of [-1,3,'1',null]) {const r=replay();r.config.tankStatsVersion=version;assert.throws(()=>validateReplay(r));}
   for(const value of ['4','-1','02',2,null]) {
     const r=replay('coop');r.config.tankStatsVersion=1;r.events=[{tick:1,slot:0,connected:false,kind:'tank',value}];assert.throws(()=>validateReplay(r));
   }
@@ -38,11 +39,11 @@ test('new power-up events and versioned drop pools validate without weakening un
     const r=replay();r.config.powerupRosterVersion=1;r.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:type}];
     assert.doesNotThrow(()=>validateReplay(r));
   }
-  for(const version of [-1,2,'1',null]){const r=replay();r.config.powerupRosterVersion=version;assert.throws(()=>validateReplay(r));}
+  for(const version of [-1,3,'1',null]){const r=replay();r.config.powerupRosterVersion=version;assert.throws(()=>validateReplay(r));}
   const forged=replay();forged.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:'infinite-health'}];assert.throws(()=>validateReplay(forged));
 });
 
 test('Wipeout damage rule is versioned and older recordings remain valid',()=>{
   for(const version of [0,1]){const r=replay();r.config.wipeoutDamageVersion=version;r.events=[{tick:1,slot:0,connected:false,kind:'powerup',value:'wipeout'}];assert.doesNotThrow(()=>validateReplay(r));}
-  for(const version of [-1,2,'1',null]){const r=replay();r.config.wipeoutDamageVersion=version;assert.throws(()=>validateReplay(r));}
+  for(const version of [-1,3,'1',null]){const r=replay();r.config.wipeoutDamageVersion=version;assert.throws(()=>validateReplay(r));}
 });
