@@ -292,6 +292,7 @@ async function consumePowerupForPlayer(
   itemId,
   expectedPowerupType,
   requestId,
+  matchId = null,
 ) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
@@ -307,6 +308,8 @@ async function consumePowerupForPlayer(
   ) {
     return { ok: false, statusText: 'INVALID REQUEST' };
   }
+  if (matchId !== null && (typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId)))
+    return { ok: false, statusText: 'INVALID MATCH' };
 
   return withAccountMutation(player, async (account) => {
     const sourceType = 'powerup-consumption';
@@ -317,7 +320,7 @@ async function consumePowerupForPlayer(
     );
 
     if (previous !== null) {
-      const samePowerup = previous.currency === `item:${itemId}`;
+      const samePowerup = previous.currency === `item:${itemId}` && (previous.eventId || null) === matchId;
       return {
         ok: samePowerup,
         statusText: samePowerup ? 'POWERUP APPROVED' : 'REQUEST ALREADY USED',
@@ -355,6 +358,7 @@ async function consumePowerupForPlayer(
       reason: 'powerup-consumed',
       sourceType,
       sourceId: requestId,
+      eventId: matchId,
     });
 
     return {
@@ -365,6 +369,55 @@ async function consumePowerupForPlayer(
       remaining: account.inventory[itemId],
       account: toPublicAccount(account),
     };
+  });
+}
+
+// A match authority can redeem a freshly consumed item using the unguessable
+// request ID. Serialize with the owner's inventory mutations so competing
+// hosts cannot apply the same receipt to different matches.
+async function redeemMultiplayerPowerup(player, itemId, requestId, matchId) {
+  if (!isValidPlayer(player) || !ACTIVE_POWERUP_TYPES[itemId] ||
+      typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId)) {
+    return { ok: false, statusText: 'INVALID RECEIPT' };
+  }
+  requestId = requestId.toLowerCase();
+  return withAccountMutation(player, async () => {
+    const consumed = await ledgerStore.findEntryBySource(player.id, 'powerup-consumption', requestId);
+    if (!consumed || consumed.currency !== `item:${itemId}` || consumed.amount !== -1 || consumed.eventId !== matchId)
+      return { ok: false, statusText: 'RECEIPT NOT FOUND' };
+    if (await ledgerStore.findEntryBySource(player.id, 'multiplayer-powerup-refund', requestId))
+      return { ok: false, statusText: 'RECEIPT REFUNDED' };
+    const prior = await ledgerStore.findEntryBySource(player.id, 'multiplayer-powerup-activation', requestId);
+    if (prior) {
+      if (prior.eventId !== matchId) return { ok: false, statusText: 'RECEIPT ALREADY USED' };
+      return { ok: true, powerupType: ACTIVE_POWERUP_TYPES[itemId], idempotent: true };
+    }
+    await ledgerStore.appendEntries({ playerId: player.id, currency: 'powerup-activation', amount: 1,
+      reason: 'multiplayer-powerup-activated', sourceType: 'multiplayer-powerup-activation', sourceId: requestId, eventId: matchId });
+    return { ok: true, powerupType: ACTIVE_POWERUP_TYPES[itemId], idempotent: false };
+  });
+}
+
+async function refundMultiplayerPowerup(player, itemId, requestId, matchId) {
+  if (!isValidPlayer(player) || !ACTIVE_POWERUP_TYPES[itemId] ||
+      typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId))
+    return {ok:false,statusText:'INVALID RECEIPT'};
+  requestId=requestId.toLowerCase();
+  return withAccountMutation(player, async account => {
+    const consumed=await ledgerStore.findEntryBySource(player.id,'powerup-consumption',requestId);
+    if(!consumed||consumed.currency!==`item:${itemId}`||consumed.eventId!==matchId)
+      return {ok:false,statusText:'RECEIPT NOT FOUND'};
+    if(await ledgerStore.findEntryBySource(player.id,'multiplayer-powerup-activation',requestId))
+      return {ok:false,statusText:'ALREADY ACTIVATED',account:toPublicAccount(account)};
+    if(await ledgerStore.findEntryBySource(player.id,'multiplayer-powerup-refund',requestId))
+      return {ok:true,idempotent:true,account:toPublicAccount(account)};
+    account.inventory[itemId]=(account.inventory[itemId]||0)+1;account.updatedAt=new Date().toISOString();
+    await writeAccount(account);
+    await ledgerStore.appendEntries({playerId:player.id,walletAddress:player.walletAddress||null,currency:`item:${itemId}`,amount:1,
+      reason:'multiplayer-powerup-refunded',sourceType:'multiplayer-powerup-refund',sourceId:requestId,eventId:matchId});
+    return {ok:true,idempotent:false,account:toPublicAccount(account)};
   });
 }
 
@@ -766,6 +819,8 @@ function isValidPlayer(value) {
 }
 
 module.exports = {
+  redeemMultiplayerPowerup,
+  refundMultiplayerPowerup,
   creditFuel,
   consumeFuelForPlayer,
   consumePowerupForPlayer,

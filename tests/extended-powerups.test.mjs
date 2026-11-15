@@ -43,6 +43,26 @@ test('new items grant inventory, survive loadout saves, and authenticated consum
  }
 });
 
+test('multiplayer receipt routes bind activation to its paid match and refund safely',async()=>{
+ const session=await sessions.createGuestSession();const player=await players.readPlayer(session.playerId);const cookie=`battlecity_session=${session.id}`;
+ const url='https://api.battlecities.com/api/economy/powerups/';
+ const call=(route,body,auth=true)=>app.fetch(new Request(url+route,{method:'POST',headers:{'content-type':'application/json',...(auth?{cookie}:{})},body:JSON.stringify(body)}));
+ assert.equal((await app.fetch(new Request(url+'redeem'))).status,200);
+ await economy.grantOnChainPurchaseForPlayer(player,'max-healer','sol','online-route-1',null);
+ const receipt={playerId:player.id,itemId:'max-healer',powerupType:'healmax',requestId:crypto.randomUUID(),matchId:'ASIA-ABC123:1:1'};
+ assert.equal((await call('consume',receipt)).status,200);
+ assert.equal((await call('redeem',{...receipt,matchId:'ASIA-OTHER01:1:1'},false)).status,400);
+ assert.equal((await call('redeem',receipt,false)).status,200);
+ assert.equal((await (await call('redeem',receipt,false)).json()).idempotent,true);
+ assert.equal((await call('refund',receipt,false)).status,401);
+ assert.equal((await (await call('refund',receipt)).json()).statusText,'ALREADY ACTIVATED');
+ await economy.grantOnChainPurchaseForPlayer(player,'max-healer','sol','online-route-2',null);
+ const second={...receipt,requestId:crypto.randomUUID()};
+ assert.equal((await call('consume',second)).status,200);
+ const refunded=await (await call('refund',second)).json();assert.equal(refunded.ok,true);assert.equal(refunded.account.inventory['max-healer'],1);
+ assert.equal((await call('redeem',second,false)).status,400);
+});
+
 test('new clients can roll each addition while old clients retain their eight-type pool',async(t)=>{
  let desired=8;const limits=[];
  t.mock.method(crypto,'randomInt',limit=>{limits.push(limit);return Math.min(desired,limit-1);});

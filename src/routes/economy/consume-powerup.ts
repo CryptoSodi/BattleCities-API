@@ -41,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     body?.itemId,
     body?.powerupType,
     body?.requestId,
+    body?.matchId ?? null,
   );
   const status = result.ok
     ? 200
