@@ -56,6 +56,26 @@ test('admin settings validate prices, token precision, and overlapping prize tie
   assert.equal(skr.atomic('9000000000.123456', 6), 9000000000123456n);
 });
 
+test('personal ranks match displayed positions when scores tie in all-time and season standings', async () => {
+  for (const suffix of ['c','b','a']) {
+    const id='ply-tie-'+suffix;
+    await record('tie-'+suffix,{playerId:id,displayName:'Tied '+suffix,gamePoints:suffix==='a'?200:100});
+    await store.grantPass(id,season,'tie-pass-'+suffix,'2026-10-05T12:00:00Z');
+  }
+  for (const scope of [null,season.id]) {
+    const board=await matches.getLeaderboard(scope,20);
+    assert.deepEqual(board.map(row=>[row.playerId,row.rank]),[['ply-tie-a',1],['ply-tie-b',2],['ply-tie-c',3]]);
+    for (const row of board) {
+      const personal=await matches.getPlayerRank(row.playerId,scope);
+      assert.equal(personal.rank,row.rank);
+      assert.equal(personal.totalPoints,row.totalPoints);
+      assert.equal(personal.matches,row.matches);
+    }
+  }
+  const cycle=await matches.getLeaderboardInWindow(null,'2026-10-05T10:00:00Z','2026-10-05T10:30:00Z',10,'ply-tie-c');
+  assert.equal(cycle.find(row=>row.playerId==='ply-tie-c').rank,3);
+});
+
 test('buying a pass includes every eligible earlier season match and preserves cycle eligibility', async () => {
   await record('old', { createdAt: '2026-10-01T00:01:00.000Z' });
   await record('recent');
@@ -322,4 +342,36 @@ test('SKR season pass checkout honors the signed price and grants one full-seaso
   assert.equal(retry.statusText, 'PURCHASE ALREADY VERIFIED');
   await assert.rejects(shop.verifyPurchase({ ...player, id: 'ply-another' }, { quoteToken: quoted.quoteToken, signature }), /already used/);
   await assert.rejects(shop.createQuote(player, { itemId: 'season-pass', currency: 'skr', walletAddress: wallet }), /already owned/);
+});
+
+test('PLAY checkout binds the verified mint, discounted SOL value and exact approved price across admin edits', async(t)=>{
+  const pricing=require('../src/services/shopTokenPricing'), play=require('../src/services/playToken');
+  const configured={...settings(),tokenPricingMode:'sol-discounted',shopSolPrices:{...config.defaults().shopSolPrices,shield:'0.02'}};
+  await config.update(configured,'ply-admin');
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,text:async()=>JSON.stringify({
+    [pricing.SOL_MINT]:{usdPrice:200},[process.env.BATTLECITY_SKR_MINT]:{usdPrice:0.02},[play.MINT]:{usdPrice:0.001}})}));
+  t.mock.method(Connection.prototype,'getLatestBlockhash',async()=>({blockhash:Keypair.generate().publicKey.toBase58(),lastValidBlockHeight:100}));
+  t.mock.method(Connection.prototype,'simulateTransaction',async()=>({value:{err:null}}));
+  t.mock.method(skr,'validateMint',async(connection,token)=>{assert.equal(token.mint,play.MINT);assert.equal(token.decimals,6);return {decimals:6};});
+  const quoted=await shop.createQuote(player,{itemId:'shield',currency:'play',walletAddress:wallet});
+  const payload=JSON.parse(Buffer.from(quoted.quoteToken.split('.')[0],'base64url'));
+  assert.equal(quoted.currency,'play');assert.equal(payload.tokenMint,play.MINT);assert.equal(payload.amountAtomic,'3200000000');
+  let paymentMint=new PublicKey(process.env.BATTLECITY_SKR_MINT);
+  t.mock.method(rpc,'getTransaction',async()=>({blockTime:Math.floor(Date.now()/1000),meta:{err:null},transaction:{message:{
+    accountKeys:[{pubkey:wallet,signer:true}],instructions:[{programId:TOKEN_PROGRAM_ID.toBase58(),parsed:{type:'transferChecked',info:{
+      authority:wallet,source:getAssociatedTokenAddressSync(paymentMint,new PublicKey(wallet)).toBase58(),
+      destination:getAssociatedTokenAddressSync(paymentMint,new PublicKey(shop.TREASURY)).toBase58(),mint:paymentMint.toBase58(),
+      tokenAmount:{amount:payload.amountAtomic,decimals:6}}}}, {program:'spl-memo',parsed:`BATC-SHOP-V1:${payload.id}`}]
+  }}}));
+  const signature='3'.repeat(88);
+  await assert.rejects(shop.verifyPurchase(player,{quoteToken:quoted.quoteToken,signature}));
+  paymentMint=new PublicKey(play.MINT);
+  await config.update({...configured,shopSolPrices:{...configured.shopSolPrices,shield:'0.04'}},'ply-admin');
+  const result=await shop.verifyPurchase(player,{quoteToken:quoted.quoteToken,signature});
+  assert.equal(result.account.inventory.shield,1);
+  const again=await shop.verifyPurchase(player,{quoteToken:quoted.quoteToken,signature});
+  assert.equal(again.statusText,'PURCHASE ALREADY VERIFIED');
+  const ledger=require('../src/stores/ledgerStore');
+  const entries=(await ledger.listEntriesForPlayer(player.id)).filter(e=>e.currency==='play');
+  assert.equal(entries.length,1);assert.equal(entries[0].amount,-3200);
 });

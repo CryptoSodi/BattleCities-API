@@ -11,15 +11,17 @@ const localMutations = new Map();
 // PostgreSQL mutations lock the account row inside the shared transaction.
 // Local development serializes the complete balance/receipt operation per player.
 function withAccountMutation(player, operation) {
-  if (hasPersistentConfig()) return database.withTransaction(async () => operation(await lockAccountForFuelMutation(player)));
+  if (hasPersistentConfig()) return database.withTransaction(async () => operation(await refillFuel(await lockAccountForFuelMutation(player))));
   const previous = localMutations.get(player.id) || Promise.resolve();
-  const next = previous.catch(() => {}).then(async () => operation(await ensureAccountForPlayer(player)));
+  const next = previous.catch(() => {}).then(async () => operation(await refillFuel(await ensureStoredAccountForPlayer(player))));
   localMutations.set(player.id, next);
   return next.finally(() => { if (localMutations.get(player.id) === next) localMutations.delete(player.id); });
 }
-const SHOP_STARTING_TOKEN_BALANCE = 1000;
-const SHOP_STARTING_SOL_BALANCE = 1.25;
+// Currency balances require real funds; account creation only grants fuel.
+const SHOP_STARTING_TOKEN_BALANCE = 0;
+const SHOP_STARTING_SOL_BALANCE = 0;
 const SHOP_STARTING_FUEL_BALANCE = 5;
+const FUEL_REFILL_INTERVAL_MS = 30 * 60 * 1000;
 const SHOP_CATALOG = {
   'fuel-one': { price: 150, solPrice: 0.01, fuel: 1 },
   'fuel-five': { price: 600, solPrice: 0.04, fuel: 5 },
@@ -32,6 +34,10 @@ const SHOP_CATALOG = {
   'zoom-out': { price: 375, solPrice: 0.025, inventory: { 'zoom-out': 1 } },
   wipeout: { price: 600, solPrice: 0.04, inventory: { wipeout: 1 } },
   'extra-life': { price: 525, solPrice: 0.035, inventory: { 'extra-life': 1 } },
+  'max-healer': { price: 450, solPrice: 0.02, inventory: { 'max-healer': 1 } },
+  'health-healer': { price: 450, solPrice: 0.01, inventory: { 'health-healer': 1 } },
+  'rapid-shooter': { price: 450, solPrice: 0.01, inventory: { 'rapid-shooter': 1 } },
+  'rapid-shooter-long': { price: 900, solPrice: 0.02, inventory: { 'rapid-shooter-long': 1 } },
   'starter-pack': {
     price: 1200,
     solPrice: 0.08,
@@ -48,6 +54,7 @@ const INVENTORY_KEYS = [
   'zoom-out',
   'wipeout',
   'extra-life',
+  'max-healer', 'health-healer', 'rapid-shooter', 'rapid-shooter-long',
 ];
 const ACTIVE_POWERUP_TYPES = {
   shield: 'shield',
@@ -57,6 +64,9 @@ const ACTIVE_POWERUP_TYPES = {
   upgrade: 'upgrade',
   'zoom-out': 'zoomout',
   wipeout: 'wipeout',
+  'extra-life': 'life',
+  'max-healer': 'healmax', 'health-healer': 'heal2',
+  'rapid-shooter': 'rapid', 'rapid-shooter-long': 'rapidlong',
 };
 
 function getDataDir() {
@@ -97,7 +107,7 @@ async function readAccount(playerId) {
       `
         SELECT player_id, provider, wallet_address, token_balance,
           sol_balance, fuel_balance, inventory_json, loadout_json,
-          created_at, updated_at
+          created_at, updated_at, fuel_refill_at
         FROM ${TABLE_NAME}
         WHERE player_id = $1
         LIMIT 1
@@ -120,7 +130,33 @@ async function readAccount(playerId) {
   }
 }
 
+// Materialize elapsed intervals on every authenticated account read or mutation.
+// The row lock also protects the refill from simultaneous logins and match starts.
 async function ensureAccountForPlayer(player) {
+  if (!isValidPlayer(player)) throw new Error('Invalid player');
+  return withAccountMutation(player, async account => account);
+}
+
+async function refillFuel(account) {
+  const now = Date.now();
+  const previous = Date.parse(account.fuelRefillAt);
+  const intervals = Math.floor((now - previous) / FUEL_REFILL_INTERVAL_MS);
+  if (intervals < 1) return account;
+  const amount = Math.max(0, SHOP_STARTING_FUEL_BALANCE - account.fuelBalance);
+  // Advance even when full: unused intervals never become banked grants.
+  account.fuelRefillAt = new Date(previous + intervals * FUEL_REFILL_INTERVAL_MS).toISOString();
+  account.fuelBalance += amount;
+  account.updatedAt = new Date(now).toISOString();
+  await writeAccount(account);
+  if (amount > 0) await ledgerStore.appendEntries({
+    playerId: account.playerId, walletAddress: account.walletAddress,
+    currency: 'fuel', amount, reason: 'thirty-minute-fuel-refill',
+    sourceType: 'fuel-refill', sourceId: account.fuelRefillAt,
+  });
+  return account;
+}
+
+async function ensureStoredAccountForPlayer(player) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
   }
@@ -141,14 +177,15 @@ async function ensureAccountForPlayer(player) {
     loadout: {},
     createdAt: now,
     updatedAt: now,
+    fuelRefillAt: now,
   });
 
   if (hasPersistentConfig()) {
     await ensureSchema();
     await getPgPool().query(`INSERT INTO ${TABLE_NAME}
       (player_id, provider, wallet_address, token_balance, sol_balance, fuel_balance,
-       inventory_json, loadout_json, created_at, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$9)
+       inventory_json, loadout_json, created_at, updated_at, fuel_refill_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$9,$9)
       ON CONFLICT (player_id) DO NOTHING`, [account.playerId, account.provider, account.walletAddress,
       account.tokenBalance, account.solBalance, account.fuelBalance, '{}', '{}', now]);
   } else {
@@ -255,6 +292,7 @@ async function consumePowerupForPlayer(
   itemId,
   expectedPowerupType,
   requestId,
+  matchId = null,
 ) {
   if (!isValidPlayer(player)) {
     throw new Error('Invalid player');
@@ -270,6 +308,8 @@ async function consumePowerupForPlayer(
   ) {
     return { ok: false, statusText: 'INVALID REQUEST' };
   }
+  if (matchId !== null && (typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId)))
+    return { ok: false, statusText: 'INVALID MATCH' };
 
   return withAccountMutation(player, async (account) => {
     const sourceType = 'powerup-consumption';
@@ -280,7 +320,7 @@ async function consumePowerupForPlayer(
     );
 
     if (previous !== null) {
-      const samePowerup = previous.currency === `item:${itemId}`;
+      const samePowerup = previous.currency === `item:${itemId}` && (previous.eventId || null) === matchId;
       return {
         ok: samePowerup,
         statusText: samePowerup ? 'POWERUP APPROVED' : 'REQUEST ALREADY USED',
@@ -318,6 +358,7 @@ async function consumePowerupForPlayer(
       reason: 'powerup-consumed',
       sourceType,
       sourceId: requestId,
+      eventId: matchId,
     });
 
     return {
@@ -328,6 +369,55 @@ async function consumePowerupForPlayer(
       remaining: account.inventory[itemId],
       account: toPublicAccount(account),
     };
+  });
+}
+
+// A match authority can redeem a freshly consumed item using the unguessable
+// request ID. Serialize with the owner's inventory mutations so competing
+// hosts cannot apply the same receipt to different matches.
+async function redeemMultiplayerPowerup(player, itemId, requestId, matchId) {
+  if (!isValidPlayer(player) || !ACTIVE_POWERUP_TYPES[itemId] ||
+      typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId)) {
+    return { ok: false, statusText: 'INVALID RECEIPT' };
+  }
+  requestId = requestId.toLowerCase();
+  return withAccountMutation(player, async () => {
+    const consumed = await ledgerStore.findEntryBySource(player.id, 'powerup-consumption', requestId);
+    if (!consumed || consumed.currency !== `item:${itemId}` || consumed.amount !== -1 || consumed.eventId !== matchId)
+      return { ok: false, statusText: 'RECEIPT NOT FOUND' };
+    if (await ledgerStore.findEntryBySource(player.id, 'multiplayer-powerup-refund', requestId))
+      return { ok: false, statusText: 'RECEIPT REFUNDED' };
+    const prior = await ledgerStore.findEntryBySource(player.id, 'multiplayer-powerup-activation', requestId);
+    if (prior) {
+      if (prior.eventId !== matchId) return { ok: false, statusText: 'RECEIPT ALREADY USED' };
+      return { ok: true, powerupType: ACTIVE_POWERUP_TYPES[itemId], idempotent: true };
+    }
+    await ledgerStore.appendEntries({ playerId: player.id, currency: 'powerup-activation', amount: 1,
+      reason: 'multiplayer-powerup-activated', sourceType: 'multiplayer-powerup-activation', sourceId: requestId, eventId: matchId });
+    return { ok: true, powerupType: ACTIVE_POWERUP_TYPES[itemId], idempotent: false };
+  });
+}
+
+async function refundMultiplayerPowerup(player, itemId, requestId, matchId) {
+  if (!isValidPlayer(player) || !ACTIVE_POWERUP_TYPES[itemId] ||
+      typeof requestId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
+      typeof matchId !== 'string' || !/^[a-z0-9:_-]{8,128}$/i.test(matchId))
+    return {ok:false,statusText:'INVALID RECEIPT'};
+  requestId=requestId.toLowerCase();
+  return withAccountMutation(player, async account => {
+    const consumed=await ledgerStore.findEntryBySource(player.id,'powerup-consumption',requestId);
+    if(!consumed||consumed.currency!==`item:${itemId}`||consumed.eventId!==matchId)
+      return {ok:false,statusText:'RECEIPT NOT FOUND'};
+    if(await ledgerStore.findEntryBySource(player.id,'multiplayer-powerup-activation',requestId))
+      return {ok:false,statusText:'ALREADY ACTIVATED',account:toPublicAccount(account)};
+    if(await ledgerStore.findEntryBySource(player.id,'multiplayer-powerup-refund',requestId))
+      return {ok:true,idempotent:true,account:toPublicAccount(account)};
+    account.inventory[itemId]=(account.inventory[itemId]||0)+1;account.updatedAt=new Date().toISOString();
+    await writeAccount(account);
+    await ledgerStore.appendEntries({playerId:player.id,walletAddress:player.walletAddress||null,currency:`item:${itemId}`,amount:1,
+      reason:'multiplayer-powerup-refunded',sourceType:'multiplayer-powerup-refund',sourceId:requestId,eventId:matchId});
+    return {ok:true,idempotent:false,account:toPublicAccount(account)};
   });
 }
 
@@ -352,8 +442,8 @@ async function appendPurchaseLedgerEntries(
   const entries = [
     {
       ...base,
-      currency: paymentCurrency === 'sol' ? 'sol' : paymentCurrency === 'skr' ? 'skr' : 'token',
-      amount: paymentCurrency === 'sol' ? -item.solPrice : paymentCurrency === 'skr' ? -item.skrPrice : -item.price,
+      currency: ['sol', 'skr', 'play'].includes(paymentCurrency) ? paymentCurrency : 'token',
+      amount: paymentCurrency === 'sol' ? -item.solPrice : paymentCurrency === 'skr' ? -item.skrPrice : paymentCurrency === 'play' ? -item.playPrice : -item.price,
     },
   ];
 
@@ -393,7 +483,7 @@ async function creditFuel(player, amount, context = {}) {
           WHERE player_id = $1
           RETURNING player_id, provider, wallet_address, token_balance,
             sol_balance, fuel_balance, inventory_json, loadout_json,
-            created_at, updated_at
+            created_at, updated_at, fuel_refill_at
         `,
         [player.id, safeAmount, new Date().toISOString()],
       );
@@ -424,7 +514,7 @@ async function lockAccountForFuelMutation(player) {
     `
       SELECT player_id, provider, wallet_address, token_balance,
         sol_balance, fuel_balance, inventory_json, loadout_json,
-        created_at, updated_at
+        created_at, updated_at, fuel_refill_at
       FROM ${TABLE_NAME}
       WHERE player_id = $1
       FOR UPDATE
@@ -432,12 +522,12 @@ async function lockAccountForFuelMutation(player) {
     [player.id],
   );
   if (result.rowCount === 0) {
-    await ensureAccountForPlayer(player);
+    await ensureStoredAccountForPlayer(player);
     result = await getPgPool().query(
       `
         SELECT player_id, provider, wallet_address, token_balance,
           sol_balance, fuel_balance, inventory_json, loadout_json,
-          created_at, updated_at
+          created_at, updated_at, fuel_refill_at
         FROM ${TABLE_NAME}
         WHERE player_id = $1
         FOR UPDATE
@@ -466,9 +556,10 @@ async function writeAccount(account) {
             inventory_json,
             loadout_json,
             created_at,
-            updated_at
+            updated_at,
+            fuel_refill_at
           )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
         ON CONFLICT (player_id) DO UPDATE SET
           provider = EXCLUDED.provider,
           wallet_address = EXCLUDED.wallet_address,
@@ -477,7 +568,8 @@ async function writeAccount(account) {
           fuel_balance = EXCLUDED.fuel_balance,
           inventory_json = EXCLUDED.inventory_json,
           loadout_json = EXCLUDED.loadout_json,
-          updated_at = EXCLUDED.updated_at
+          updated_at = EXCLUDED.updated_at,
+          fuel_refill_at = EXCLUDED.fuel_refill_at
       `,
       [
         normalized.playerId,
@@ -490,6 +582,7 @@ async function writeAccount(account) {
         JSON.stringify(normalized.loadout),
         normalized.createdAt,
         normalized.updatedAt,
+        normalized.fuelRefillAt,
       ],
     );
     return;
@@ -528,6 +621,7 @@ function fromRow(row) {
     fuelBalance: Number(row.fuel_balance || 0),
     inventory: parseJson(row.inventory_json, {}),
     loadout: parseJson(row.loadout_json, {}),
+    fuelRefillAt: new Date(row.fuel_refill_at).toISOString(),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
@@ -546,6 +640,8 @@ function normalizeAccount(value) {
     fuelBalance: normalizeInteger(account.fuelBalance, 0),
     inventory: normalizeObject(account.inventory),
     loadout: normalizeObject(account.loadout),
+    fuelRefillAt: Number.isFinite(Date.parse(account.fuelRefillAt)) ? account.fuelRefillAt
+      : (Number.isFinite(Date.parse(account.createdAt)) ? account.createdAt : now),
     createdAt: typeof account.createdAt === 'string' ? account.createdAt : now,
     updatedAt: typeof account.updatedAt === 'string' ? account.updatedAt : now,
   };
@@ -723,6 +819,8 @@ function isValidPlayer(value) {
 }
 
 module.exports = {
+  redeemMultiplayerPowerup,
+  refundMultiplayerPowerup,
   creditFuel,
   consumeFuelForPlayer,
   consumePowerupForPlayer,

@@ -45,10 +45,11 @@ export async function GET(request: Request): Promise<Response> {
     rows = await tradingStore.getLeaderboard(season?.startsAt || null, season?.endsAt || null, 20, player?.id || null);
   }
 
-  const me = period?.closedAt || scope === 'trading'
+  const listedMe = player ? rows.find((r: any) => r.playerId === player.id) : null;
+  const me = listedMe || (period?.closedAt || scope === 'trading'
     ? (player ? rows.find((r: any) => r.playerId === player.id) || { displayName: player.displayName, rank: null,
         totalPoints: period?.closedAt ? null : 0, matches: period?.closedAt ? null : 0, outsideSnapshot: !!period?.closedAt } : null)
-    : await resolveMe(request, scope, seasonId);
+    : await resolveMe(request, scope, seasonId));
   const pass = player && seasonId && scope === 'gaming' ? await competitionStore.getPass(player.id, seasonId) : null;
 
   return createJsonResponse(request, {
@@ -103,6 +104,7 @@ async function resolveMe(
 
   const rank = await matchResultStore.getPlayerRank(player.id, seasonId);
   return {
+    playerId: player.id,
     displayName: player.displayName,
     rank: rank === null ? null : rank.rank,
     totalPoints: rank === null ? 0 : rank.totalPoints,

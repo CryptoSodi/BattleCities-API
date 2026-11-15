@@ -12,6 +12,8 @@ export function OPTIONS(request: Request): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (request.headers.get('origin') === 'https://magic.battlecities.com')
+    return json(request, { error: 'Use the MagicBlock session drop endpoint.' }, 409);
   const player = await resolvePlayer(request);
   let body: any;
   try {
@@ -20,8 +22,11 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid JSON.' }, 400);
   }
 
+  const powerupRosterVersion = body?.powerupRosterVersion ?? 0;
+  if (powerupRosterVersion !== 0 && powerupRosterVersion !== 1)
+    return json(request, { error: 'Unsupported power-up roster version.' }, 400);
   try {
-    const result = await batcDrops.roll(player, body?.requestId, body?.levelNumber);
+    const result = await batcDrops.roll(player, body?.requestId, body?.levelNumber, powerupRosterVersion);
     return json(request, result?.reward
       ? {
           eligible: true,

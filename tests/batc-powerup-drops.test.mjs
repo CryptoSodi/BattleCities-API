@@ -28,7 +28,7 @@ test('disabled BATC drops do not require a database or issue a claim', async () 
   assert.equal(typeof result.dropType, 'string');
   assert.ok([
     'defence', 'freeze', 'life', 'shield',
-    'speed', 'upgrade', 'zoomout', 'wipeout',
+    'speed', 'upgrade', 'zoomout', 'wipeout', 'healmax', 'heal2', 'rapid', 'rapidlong',
   ].includes(result.dropType));
   assert.equal(result.reward, null);
 });

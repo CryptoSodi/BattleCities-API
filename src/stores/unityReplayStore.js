@@ -44,8 +44,8 @@ function toSummary(record) {
   const { replay, playerId, ...summary } = record;
   return summary;
 }
-async function createSession(playerId, input) {
-  assertPlayer(playerId); const settings = format.validateSessionInput(input);
+async function createSession(playerId, input, magicBlock = false) {
+  assertPlayer(playerId); const settings = { ...format.validateSessionInput(input), magicBlock };
   let seed = 0; while (seed === 0) seed = crypto.randomBytes(4).readUInt32LE();
   const issuedAt = Date.now();
   const session = { id: `urs-${crypto.randomBytes(16).toString('hex')}`, playerId, seed, ...settings,
@@ -86,6 +86,7 @@ async function mutateSession(id, playerId, operation) {
   });
 }
 function checkBinding(session, replay) {
+  if (!session.magicBlock && replay.events.some(e => e.kind === 'magicpickup')) throw new ReplayError(409, 'MagicBlock events require an experimental session');
   for (const key of ['seed', 'simulationVersion', 'buildVersion', 'levelNumber', 'levelHash', 'configHash', 'tickRate', 'mode']) {
     if (session[key] !== replay[key]) throw new ReplayError(409, `Replay does not match issued ${key}`);
   }
@@ -105,7 +106,7 @@ async function submitReplay(playerId, sessionId, replay) {
       createdAt: new Date().toISOString(), levelNumber: replay.levelNumber, mode: replay.mode, durationTicks: replay.durationTicks,
       validationStatus: 'pending', verificationStatus: 'pending', claimedResult: replay.claimedResult,
       completion: replay.completion, debugUsed,
-      rewardCandidate: replay.mode === 'single' && replay.completion === 'completed' && !debugUsed && (replay.claimedResult.won || replay.claimedResult.lost),
+      rewardCandidate: !session.magicBlock && !replay.events.some(e => e.kind === 'magicpickup') && replay.mode === 'single' && replay.completion === 'completed' && !debugUsed && (replay.claimedResult.won || replay.claimedResult.lost),
       competitiveApproval: 'review_required',
       verification: { method: 'none', reproducibilityStatus: 'pending', checkedAt: null, reason: null }, replay };
     if (db) await db.query(`INSERT INTO battlecity_replays
