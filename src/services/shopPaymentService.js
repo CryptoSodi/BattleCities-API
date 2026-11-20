@@ -28,6 +28,7 @@ const competitionStore = require('../stores/competitionStore');
 const seasonStore = require('../stores/seasonStore');
 const ledgerStore = require('../stores/ledgerStore');
 const { attributeTransfer } = require('./cherryAttribution');
+const { matchesApprovedTransaction } = require('./quotedTransaction');
 
 const solanaNetwork = require('../config/solanaNetwork');
 const NETWORK = solanaNetwork.network();
@@ -216,14 +217,15 @@ async function createQuote(player, input) {
   }
 
   // Bind the quote to the exact transaction message before the wallet signs it.
-  payload.messageHash = crypto.createHash('sha256').update(transaction.serializeMessage()).digest('hex');
+  const originalTransaction = transaction.serialize({ requireAllSignatures: false, verifySignatures: false });
+  payload.messageHash = crypto.createHash('sha256').update(originalTransaction.subarray(65)).digest('hex');
+  // The authenticated quote carries the original message so the server can
+  // compare it with any wallet-added Lighthouse assertions before broadcast.
+  payload.originalTransaction = originalTransaction.toString('base64');
   payload.lastValidBlockHeight = lastValidBlockHeight;
   return {
     quoteToken: signPayload(payload, config.quoteSecret),
-    transaction: transaction.serialize({
-      requireAllSignatures: false,
-      verifySignatures: false,
-    }).toString('base64'),
+    transaction: payload.originalTransaction,
     blockhash,
     lastValidBlockHeight,
     expiresAt: new Date(payload.expiresAt).toISOString(),
@@ -411,15 +413,25 @@ async function submitPurchase(player, input, connection = null) {
   }
   const bytes = Buffer.from(encoded, 'base64');
   if (bytes.length > 1232 || bytes[0] !== 1) throw new Error('Invalid shop transaction size or signatures.');
-  const transaction = Transaction.from(bytes);
-  const hash = crypto.createHash('sha256').update(transaction.serializeMessage()).digest('hex');
-  if (!/^[a-f0-9]{64}$/.test(quote.messageHash || '') || hash !== quote.messageHash
-    || transaction.feePayer?.toBase58() !== player.walletAddress
-    || transaction.signatures.length !== 1 || !transaction.verifySignatures()) {
+  const transaction = VersionedTransaction.deserialize(bytes);
+  const message = bytes.subarray(65);
+  const signedHash = crypto.createHash('sha256').update(message).digest('hex');
+  const original = quote.originalTransaction ? Buffer.from(quote.originalTransaction, 'base64') : null;
+  const originalHash = original && original[0] === 1 && original.length > 65 && original.length <= 1232
+    ? crypto.createHash('sha256').update(original.subarray(65)).digest('hex') : null;
+  const matches = signedHash === quote.messageHash || (originalHash === quote.messageHash
+    && matchesApprovedTransaction(original, bytes));
+  const wallet = new PublicKey(player.walletAddress);
+  const publicKey = crypto.createPublicKey({ format: 'der', type: 'spki',
+    key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), wallet.toBuffer()]) });
+  if (!/^[a-f0-9]{64}$/.test(quote.messageHash || '') || !matches
+    || transaction.version !== 'legacy' || transaction.message.header.numRequiredSignatures !== 1
+    || !transaction.message.staticAccountKeys[0].equals(wallet)
+    || !crypto.verify(null, message, publicKey, Buffer.from(transaction.signatures[0]))) {
     throw new Error('Signed transaction does not match the shop quote.');
   }
   const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
-  const signature = bs58.encode(transaction.signature);
+  const signature = bs58.encode(transaction.signatures[0]);
   const existing = await shopPaymentStore.readPayment(quote.id);
   if (existing) return { ...await verifyPurchase(player, { quoteToken: input.quoteToken, signature }), signature };
   connection ||= new Connection(config.rpcUrl, 'confirmed');
