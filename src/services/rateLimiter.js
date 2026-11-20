@@ -10,6 +10,7 @@ const LIMITS = {
   'magic-session': { max: 6, windowMs: 60000 },
   'magic-drop': { max: 90, windowMs: 60000 },
   'session-create': { max: 20, windowMs: 60 * 1000 },
+  'cherry-chat-token': { max: 20, windowMs: 60 * 1000 },
   'wallet-challenge': { max: 20, windowMs: 60 * 1000 },
   'matches-submit': { max: 10, windowMs: 60 * 1000 },
   'replay-session-create': { max: 20, windowMs: 60 * 1000 },
