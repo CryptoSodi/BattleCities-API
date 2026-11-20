@@ -25,7 +25,7 @@ export async function GET(request: Request): Promise<Response> {
     return json(request, { authenticated: false });
   }
 
-  const player = await playerStore.readPlayer(session.playerId);
+  const player = await playerStore.readPlayerForSession(session);
   if (player === null) {
     return json(request, { authenticated: false });
   }

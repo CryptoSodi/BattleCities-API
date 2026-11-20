@@ -55,6 +55,7 @@ import * as unityReplays from '../routes/replays/unity';
 import * as adminUnityReplays from '../routes/admin/unityReplays';
 import * as seasonCurrent from '../routes/seasons/current';
 import * as session from '../routes/session';
+import * as cherrySession from '../routes/cherrySession';
 import * as tradingTokens from '../routes/trading/tokens';
 import * as tradingVerifySwap from '../routes/trading/verify-swap';
 import { createJsonResponse, createOptionsResponse } from '../routes/_helpers';
@@ -127,6 +128,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'replays/validate': replayValidate,
   'seasons/current': seasonCurrent,
   session,
+  'auth/cherry': cherrySession,
   'trading/tokens': tradingTokens,
   'trading/verify-swap': tradingVerifySwap,
 };

@@ -18,5 +18,5 @@ export async function resolveSessionPlayer(request: Request): Promise<any> {
     return null;
   }
 
-  return playerStore.readPlayer(session.playerId);
+  return playerStore.readPlayerForSession(session);
 }

@@ -46,6 +46,12 @@ async function createWalletSession(walletAddress) {
   });
 }
 
+async function createCherrySession(cherryId, walletAddress, displayName) {
+  if (!isValidWalletAddress(walletAddress)) throw new Error('Invalid wallet address');
+  const player = await playerStore.findOrCreateCherryPlayer(cherryId, displayName);
+  return createSession('cherry', { playerId: player.id, walletAddress });
+}
+
 async function createGuestSession() {
   const player = await playerStore.createGuestPlayer();
   return createSession('guest', { playerId: player.id });
@@ -210,9 +216,9 @@ function isValidSession(value) {
     typeof value === 'object' &&
     value !== null &&
     isValidSessionId(value.id) &&
-    (value.provider === 'wallet' || value.provider === 'guest') &&
+    (value.provider === 'wallet' || value.provider === 'guest' || value.provider === 'cherry') &&
     typeof value.playerId === 'string' && /^ply-[a-z0-9-]+$/i.test(value.playerId) &&
-    (value.provider !== 'wallet' || isValidWalletAddress(value.walletAddress)) &&
+    (!['wallet', 'cherry'].includes(value.provider) || isValidWalletAddress(value.walletAddress)) &&
     Date.parse(value.lastSeenAt) > Date.now() - 30 * 24 * 60 * 60 * 1000 &&
     typeof value.createdAt === 'string' &&
     typeof value.lastSeenAt === 'string' &&
@@ -233,6 +239,7 @@ function isValidWalletAddress(value) {
 
 module.exports = {
   createGuestSession,
+  createCherrySession,
   createWalletSession,
   deleteSession,
   isPersistentStoreConfigured: hasPersistentConfig,

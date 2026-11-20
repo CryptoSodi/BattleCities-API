@@ -46,7 +46,7 @@ async function resolvePlayer(request: Request): Promise<any> {
   if (sessionId === null) return null;
   const session = await sessionStore.readSession(sessionId);
   if (session === null || session.playerId === null) return null;
-  const player = await playerStore.readPlayer(session.playerId);
+  const player = await playerStore.readPlayerForSession(session);
   return player?.provider === 'wallet' ? player : null;
 }
 

@@ -47,7 +47,7 @@ async function resolvePlayer(request: Request): Promise<any | null> {
   if (sessionId === null) return null;
   const session = await sessionStore.readSession(sessionId);
   if (session === null || session.playerId === null) return null;
-  return playerStore.readPlayer(session.playerId);
+  return playerStore.readPlayerForSession(session);
 }
 
 function json(request: Request, body: any, status = 200): Response {

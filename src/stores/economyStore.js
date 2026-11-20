@@ -169,7 +169,7 @@ async function ensureStoredAccountForPlayer(player) {
   const account = normalizeAccount({
     playerId: player.id,
     provider: player.provider,
-    walletAddress: player.walletAddress || null,
+    walletAddress: player.cherryIdentity ? null : (player.walletAddress || null),
     tokenBalance: SHOP_STARTING_TOKEN_BALANCE,
     solBalance: SHOP_STARTING_SOL_BALANCE,
     fuelBalance: SHOP_STARTING_FUEL_BALANCE,
@@ -655,7 +655,7 @@ function normalizeSyncedAccount(existing, snapshot, player) {
     ...existing,
     playerId: existing.playerId,
     provider: player.provider,
-    walletAddress: player.walletAddress || existing.walletAddress || null,
+    walletAddress: player.cherryIdentity ? null : (player.walletAddress || existing.walletAddress || null),
     tokenBalance: existing.tokenBalance,
     solBalance: existing.solBalance,
     fuelBalance: normalizeNonIncreasingInteger(

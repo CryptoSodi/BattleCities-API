@@ -76,6 +76,18 @@ test('personal ranks match displayed positions when scores tie in all-time and s
   assert.equal(cycle.find(row=>row.playerId==='ply-tie-c').rank,3);
 });
 
+test('rankings use the wallet from the latest eligible match when a player changes wallets', async () => {
+  const newerWallet = Keypair.generate().publicKey.toBase58();
+  const ignoredWallet = Keypair.generate().publicKey.toBase58();
+  await record('z-older', { createdAt: '2026-10-05T10:01:00Z', walletAddress: wallet });
+  await record('a-newer', { createdAt: '2026-10-05T10:02:00Z', walletAddress: newerWallet });
+  await record('zz-pending', { createdAt: '2026-10-05T10:03:00Z', walletAddress: ignoredWallet, validationStatus: 'pending' });
+  const eligible = await matches.getLeaderboardInWindow(null, '2026-10-05T10:00:00Z', '2026-10-05T10:30:00Z', 10, null, true);
+  assert.equal(eligible[0].walletAddress, newerWallet);
+  assert.equal(eligible[0].totalPoints, 200);
+  assert.equal((await matches.getLeaderboard(null, 20, true))[0].walletAddress, newerWallet);
+});
+
 test('buying a pass includes every eligible earlier season match and preserves cycle eligibility', async () => {
   await record('old', { createdAt: '2026-10-01T00:01:00.000Z' });
   await record('recent');
@@ -118,18 +130,33 @@ test('SOL pass purchases verify exact transfer amounts and survive repeated veri
   assert.equal((await shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature })).statusText, 'PURCHASE ALREADY VERIFIED');
 });
 
-async function signedQuote(t) {
+async function signedQuote(t, principal = player) {
   const current = { ...season, startsAt: new Date(Date.now() - 86400000).toISOString(), endsAt: new Date(Date.now() + 86400000).toISOString() };
   await fs.writeFile(path.join(root, 'seasons', 'seasons.json'), JSON.stringify([current]));
   await config.update(settings(), 'ply-admin');
   t.mock.method(Connection.prototype, 'getLatestBlockhash', async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 100 }));
   t.mock.method(Connection.prototype, 'simulateTransaction', async () => ({ value: { err: null } }));
   t.mock.method(Connection.prototype, 'getSignatureStatuses', async () => ({ value: [null] }));
-  const quote = await shop.createQuote(player, { itemId: 'season-pass', currency: 'sol', seasonId: current.id });
+  const quote = await shop.createQuote(principal, { itemId: 'season-pass', currency: 'sol', seasonId: current.id });
   const tx = Transaction.from(Buffer.from(quote.transaction, 'base64'));
   tx.sign(walletKeypair);
   return { quote, tx, input: { quoteToken: quote.quoteToken, signedTransaction: tx.serialize().toString('base64') } };
 }
+
+test('Cherry quote includes attribution in the server-signed payment message', async (t) => {
+  const cherry = { ...player, cherryIdentity: true };
+  const { quote, tx, input } = await signedQuote(t, cherry);
+  const { reference } = require('../dist/src/services/cherryAttribution');
+  const transfer = Transaction.from(Buffer.from(quote.transaction, 'base64')).instructions[2];
+  const referenceAccount = transfer.keys.find(key => key.pubkey.equals(reference));
+  assert.ok(referenceAccount);
+  assert.equal(referenceAccount.isSigner, false);
+  assert.equal(referenceAccount.isWritable, false);
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(tx.signature);
+  t.mock.method(Connection.prototype, 'sendRawTransaction', async () => signature);
+  assert.equal((await shop.submitPurchase(cherry, input)).signature, signature);
+});
 
 test('checkout broadcasts only the exact server message signed by the authenticated wallet', async (t) => {
   const { tx, input } = await signedQuote(t);

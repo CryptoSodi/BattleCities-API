@@ -82,7 +82,7 @@ async function resolveMe(
     return null;
   }
 
-  const player = await playerStore.readPlayer(session.playerId);
+  const player = await playerStore.readPlayerForSession(session);
   if (player === null) {
     return null;
   }
