@@ -31,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { ok: false, error: 'Not logged in' }, 401);
   }
 
-  const player = await playerStore.readPlayer(session.playerId);
+  const player = await playerStore.readPlayerForSession(session);
   if (player === null) {
     return json(request, { ok: false, error: 'Player not found' }, 404);
   }

@@ -166,7 +166,7 @@ async function getLeaderboard(seasonId, limit = 20, acceptedOnly = false) {
     const result = await getPgPool().query(
       `
         SELECT player_id,
-          MAX(wallet_address) AS wallet_address,
+          (array_agg(wallet_address ORDER BY created_at DESC, id DESC))[1] AS wallet_address,
           MAX(display_name) AS display_name,
           SUM(game_points)::bigint AS total_points,
           COUNT(*)::int AS matches
@@ -231,7 +231,7 @@ async function getLeaderboardInWindow(seasonId, startsAt, endsAt, limit = 10, pl
     const limitParam = params.length;
     params.push(isValidPlayerId(playerId) ? playerId : null);
     const result = await getPgPool().query(
-      `WITH totals AS (SELECT player_id, MAX(wallet_address) AS wallet_address,
+      `WITH totals AS (SELECT player_id, (array_agg(wallet_address ORDER BY created_at DESC, id DESC))[1] AS wallet_address,
         MAX(display_name) AS display_name, SUM(game_points)::bigint AS total_points,
         COUNT(*)::int AS matches
        FROM ${TABLE_NAME} WHERE ${where}
@@ -530,6 +530,7 @@ async function aggregateFileResults(scopeSeasonId, acceptedOnly = false) {
   }
 
   const byPlayer = new Map();
+  const latestResultByPlayer = new Map();
   for (const file of files) {
     if (!file.endsWith('.json')) {
       continue;
@@ -573,6 +574,7 @@ async function aggregateFileResults(scopeSeasonId, acceptedOnly = false) {
     };
     existing.totalPoints += Number(result.gamePoints) || 0;
     existing.matches += 1;
+    updateLatestResultWallet(existing, result, latestResultByPlayer);
     byPlayer.set(result.playerId, existing);
   }
 
@@ -581,6 +583,7 @@ async function aggregateFileResults(scopeSeasonId, acceptedOnly = false) {
 
 async function aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedOnly = false) {
   const byPlayer = new Map();
+  const latestResultByPlayer = new Map();
   let files;
   try { files = await fs.readdir(getDataDir()); } catch { return []; }
   for (const file of files) {
@@ -595,9 +598,23 @@ async function aggregateFileResultsInWindow(scopeSeasonId, start, end, acceptedO
     const row = byPlayer.get(result.playerId) || { playerId: result.playerId, walletAddress: result.walletAddress || null, displayName: result.displayName || 'Player', totalPoints: 0, matches: 0 };
     row.totalPoints += Number(result.gamePoints) || 0;
     row.matches += 1;
+    updateLatestResultWallet(row, result, latestResultByPlayer);
     byPlayer.set(result.playerId, row);
   }
   return Array.from(byPlayer.values());
+}
+
+// A Cherry identity can use different verified wallets on different runs.
+// Rewards follow the wallet of the most recent eligible result in the period.
+function updateLatestResultWallet(row, result, latestByPlayer) {
+  const time = Date.parse(result.createdAt);
+  if (!Number.isFinite(time)) return;
+  const id = typeof result.id === 'string' ? result.id : '';
+  const previous = latestByPlayer.get(result.playerId);
+  if (!previous || time > previous.time || (time === previous.time && id > previous.id)) {
+    row.walletAddress = result.walletAddress || null;
+    latestByPlayer.set(result.playerId, { time, id });
+  }
 }
 
 function toPublicResult(result, replayAvailable = typeof result.replayId === 'string' && result.validationStatus !== 'rejected') {

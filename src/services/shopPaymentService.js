@@ -27,6 +27,7 @@ const competitionConfig = require('./competitionConfig');
 const competitionStore = require('../stores/competitionStore');
 const seasonStore = require('../stores/seasonStore');
 const ledgerStore = require('../stores/ledgerStore');
+const { attributeTransfer } = require('./cherryAttribution');
 
 const solanaNetwork = require('../config/solanaNetwork');
 const NETWORK = solanaNetwork.network();
@@ -190,6 +191,10 @@ async function createQuote(player, input) {
     ));
   }
 
+  // cherryIdentity is set only by the server's verified Cherry session. Append
+  // the reference before simulation and hashing so the wallet signs exactly
+  // the same message the quote and the server verify.
+  attributeTransfer(transaction.instructions[transaction.instructions.length - 1], player.cherryIdentity === true);
   transaction.add(new TransactionInstruction({
     programId: MEMO_PROGRAM_ID,
     keys: [],

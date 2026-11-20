@@ -59,6 +59,44 @@ async function findOrCreateWalletPlayer(walletAddress) {
   });
 }
 
+// Cherry identities are stable across payment-wallet changes. Do not infer a
+// link to an existing wallet player: that could silently merge two accounts.
+// The payment wallet belongs to a verified launch/session, not this record.
+async function findOrCreateCherryPlayer(cherryId, displayName) {
+  if (typeof cherryId !== 'string' || !cherryId.trim() || cherryId.length > 256) {
+    throw new Error('Invalid Cherry identity');
+  }
+  const id = `ply-cherry-${crypto.createHash('sha256').update('battlecities:cherry:v1:').update(cherryId, 'utf8').digest('hex')}`;
+  const name = typeof displayName === 'string'
+    ? displayName.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 32)
+    : '';
+  const now = new Date().toISOString();
+  const player = { id, provider: 'wallet', displayName: name || 'CHERRY PLAYER',
+    createdAt: now, updatedAt: now, lastSeenAt: now, walletAddress: null,
+    highscorePrimary: 0, highscoreSecondary: 0 };
+
+  if (hasPersistentConfig()) {
+    await ensureSchema();
+    const result = await getPgPool().query(
+      `INSERT INTO ${TABLE_NAME} (id, provider, display_name, created_at, updated_at, last_seen_at, wallet_address)
+       VALUES ($1, $2, $3, $4, $4, $4, NULL)
+       ON CONFLICT (id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+       RETURNING *`,
+      [id, player.provider, player.displayName, now],
+    );
+    return fromRow(result.rows[0]);
+  }
+
+  return withLocalPlayerMutation(id, async () => {
+    await ensureDataDir();
+    try { await fs.writeFile(getPlayerPath(id), JSON.stringify(player), { encoding: 'utf8', flag: 'wx' }); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    const result = await readPlayer(id);
+    if (!result) throw new Error('Could not load Cherry player');
+    return result;
+  });
+}
+
 async function createGuestPlayer() {
   return createPlayer({ provider: 'guest', displayName: `Guest-${crypto.randomBytes(3).toString('hex').toUpperCase()}` });
 }
@@ -96,6 +134,18 @@ async function readPlayer(id) {
   } catch {
     return null;
   }
+}
+
+// The wallet on a Cherry launch can change without changing the player ID.
+// Resolve it from the verified server-side session, never from request data.
+async function readPlayerForSession(session) {
+  if (!session || typeof session.playerId !== 'string') return null;
+  const player = await module.exports.readPlayer(session.playerId);
+  if (player && session.provider === 'cherry') {
+    if (!isValidWalletAddress(session.walletAddress)) return null;
+    return { ...player, walletAddress: session.walletAddress, cherryIdentity: true };
+  }
+  return player;
 }
 
 async function createPlayer(input) {
@@ -361,8 +411,10 @@ function isValidWalletAddress(value) {
 module.exports = {
   createGuestPlayer,
   findOrCreateWalletPlayer,
+  findOrCreateCherryPlayer,
   isPersistentStoreConfigured: hasPersistentConfig,
   mergeHighscores,
   readPlayer,
+  readPlayerForSession,
   toPublicPlayer,
 };
