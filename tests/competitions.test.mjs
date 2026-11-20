@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
-const { Keypair, Connection, PublicKey, Transaction, SystemProgram, ComputeBudgetInstruction, VersionedTransaction } = require('@solana/web3.js');
+const { Keypair, Connection, PublicKey, Transaction, TransactionInstruction, SystemProgram, ComputeBudgetInstruction, VersionedTransaction } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } = require('@solana/spl-token');
 const store = require('../src/stores/competitionStore');
 const config = require('../src/services/competitionConfig');
@@ -173,6 +173,37 @@ test('checkout broadcasts only the exact server message signed by the authentica
   await assert.rejects(shop.submitPurchase(player, { ...input, signedTransaction: tx.serialize().toString('base64') }), /does not match/);
   await assert.rejects(shop.submitPurchase({ ...player, walletAddress: Keypair.generate().publicKey.toBase58() }, input), /wallet/i);
   assert.equal(sends, 1);
+});
+
+test('checkout accepts Phantom safety assertions but rejects changed or extra payments', async (t) => {
+  const { quote } = await signedQuote(t);
+  const lighthouse = new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95');
+  const safe = opcode => new TransactionInstruction({programId:lighthouse,
+    keys:[{pubkey:walletKeypair.publicKey,isSigner:false,isWritable:false}],data:Buffer.from([opcode,0])});
+  const make = () => Transaction.from(Buffer.from(quote.transaction, 'base64'));
+  const tx = make();
+  tx.instructions.splice(2,0,safe(6),safe(6));
+  tx.add(safe(6),safe(10));
+  tx.sign(walletKeypair);
+  const bs58Module=require('bs58'),bs58=bs58Module.default||bs58Module;
+  let sends=0;
+  t.mock.method(Connection.prototype,'sendRawTransaction',async bytes=>{sends++;return bs58.encode(Transaction.from(bytes).signature);});
+  assert.equal((await shop.submitPurchase(player,{quoteToken:quote.quoteToken,signedTransaction:tx.serialize().toString('base64')})).submitted,true);
+  for (const mutation of [
+    bad=>bad.add(safe(0)),
+    bad=>bad.add(safe(1)),
+    bad=>bad.add(safe(11)),
+    bad=>bad.add(new TransactionInstruction({programId:lighthouse,keys:[{pubkey:Keypair.generate().publicKey,isSigner:false,isWritable:true}],data:Buffer.from([6,0])})),
+    bad=>bad.add(new TransactionInstruction({programId:Keypair.generate().publicKey,keys:[],data:Buffer.from([6,0])})),
+    bad=>bad.add(require('@solana/web3.js').ComputeBudgetProgram.setComputeUnitPrice({microLamports:1000})),
+    bad=>bad.add(SystemProgram.transfer({fromPubkey:walletKeypair.publicKey,toPubkey:Keypair.generate().publicKey,lamports:1})),
+    bad=>{bad.instructions[2]=SystemProgram.transfer({fromPubkey:walletKeypair.publicKey,toPubkey:Keypair.generate().publicKey,lamports:1});},
+    bad=>{bad.recentBlockhash=Keypair.generate().publicKey.toBase58();},
+  ]) {
+    const bad=make();mutation(bad);bad.sign(walletKeypair);
+    await assert.rejects(shop.submitPurchase(player,{quoteToken:quote.quoteToken,signedTransaction:bad.serialize().toString('base64')}),/does not match/);
+  }
+  assert.equal(sends,1);
 });
 
 test('Phantom-compatible quotes bind an explicit fee and preserve their legacy wire message', async (t) => {
@@ -369,6 +400,21 @@ test('SKR season pass checkout honors the signed price and grants one full-seaso
   assert.equal(retry.statusText, 'PURCHASE ALREADY VERIFIED');
   await assert.rejects(shop.verifyPurchase({ ...player, id: 'ply-another' }, { quoteToken: quoted.quoteToken, signature }), /already used/);
   await assert.rejects(shop.createQuote(player, { itemId: 'season-pass', currency: 'skr', walletAddress: wallet }), /already owned/);
+});
+
+test('SKR fuel quote with Phantom assertions is accepted without changing the token transfer', async (t) => {
+  await config.update({...settings(),shopSkrPrices:{...config.defaults().shopSkrPrices,'fuel-one':'57'}},'ply-admin');
+  t.mock.method(Connection.prototype,'getLatestBlockhash',async()=>({blockhash:Keypair.generate().publicKey.toBase58(),lastValidBlockHeight:100}));
+  t.mock.method(Connection.prototype,'simulateTransaction',async()=>({value:{err:null}}));
+  t.mock.method(skr,'validateMint',async()=>({decimals:6}));
+  const quote=await shop.createQuote(player,{itemId:'fuel-one',currency:'skr',walletAddress:wallet});
+  const tx=Transaction.from(Buffer.from(quote.transaction,'base64'));
+  const lighthouse=new PublicKey('L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95');
+  const safe=opcode=>new TransactionInstruction({programId:lighthouse,keys:[{pubkey:walletKeypair.publicKey,isSigner:false,isWritable:false}],data:Buffer.from([opcode,0])});
+  tx.instructions.splice(2,0,safe(6),safe(6));tx.add(safe(6),safe(10));tx.sign(walletKeypair);
+  const bs58Module=require('bs58'),bs58=bs58Module.default||bs58Module;
+  t.mock.method(Connection.prototype,'sendRawTransaction',async()=>bs58.encode(tx.signature));
+  assert.equal((await shop.submitPurchase(player,{quoteToken:quote.quoteToken,signedTransaction:tx.serialize().toString('base64')})).submitted,true);
 });
 
 test('PLAY checkout binds the verified mint, discounted SOL value and exact approved price across admin edits', async(t)=>{
