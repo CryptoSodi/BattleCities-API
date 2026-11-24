@@ -19,6 +19,7 @@ const {
 } = require('@solana/spl-token');
 const economyStore = require('../stores/economyStore');
 const shopPaymentStore = require('../stores/shopPaymentStore');
+const referralStore = require('../stores/referralStore');
 const solanaRpc = require('./solanaRpc');
 const skrToken = require('./skrToken');
 const playToken = require('./playToken');
@@ -327,6 +328,9 @@ async function verifyPurchase(player, input) {
     confirmedAt,
   }, async (inserted) => {
     if (inserted) {
+      await referralStore.accruePayment({ signature, playerId: player.id, currency: quote.currency, amountAtomic: quote.amountAtomic, confirmedAt,
+        eligibleAt: new Date(quote.issuedAt).toISOString(), network: quote.network, mint: quote.currency === 'sol' ? null : token.mint,
+        tokenProgram: quote.currency === 'sol' ? null : token.programId, decimals: quote.currency === 'sol' ? 9 : token.decimals });
       if (quote.itemId === 'season-pass') {
         const season = await seasonStore.readSeason(quote.seasonId);
         if (!season) throw new Error('Season not found.');
@@ -357,6 +361,60 @@ async function verifyPurchase(player, input) {
     account: result.account,
     seasonPass: quote.seasonId ? await competitionStore.getPass(player.id, quote.seasonId) : null,
   };
+}
+
+// A sign-and-send wallet can broadcast while its response is lost. Recover by
+// the authenticated quote's unique memo; absence from RPC history is never
+// treated as proof that no payment was submitted.
+async function recoverPurchase(player, input, connection = null) {
+  const config = getConfig();
+  assertConfigured(config);
+  const quote = verifyQuoteToken(input?.quoteToken, config.quoteSecret);
+  const token = paymentToken(quote.currency, config);
+  const paymentConfig = { ...config, tokenMint: new PublicKey(token.mint),
+    tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals };
+  validateQuote(quote, paymentConfig, player);
+  const existing = await shopPaymentStore.readPayment(quote.id);
+  if (existing) return verifyPurchase(player, { quoteToken: input.quoteToken, signature: existing.signature });
+  connection ||= new Connection(config.rpcUrl, 'confirmed');
+  const pending = { ok: false, pending: true, statusText: 'Payment status is not yet known. Check this payment before trying again.' };
+  const signature = String(input?.signature || '');
+  if (signature) {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(signature)) throw new Error('Invalid transaction signature.');
+    try { return await verifyPurchase(player, { quoteToken: input.quoteToken, signature }); } catch { /* Check finalized failure below. */ }
+    try {
+      const status = (await connection.getSignatureStatuses([signature], { searchTransactionHistory: true })).value[0];
+      if (status?.err && status.confirmationStatus === 'finalized') {
+        const tx = await solanaRpc.getTransaction(signature, config.rpcUrl);
+        if (tx?.meta?.err) {
+          // Check that this finalized failure belongs to this wallet and quote;
+          // a failed unrelated signature must not release the pending purchase.
+          verifyPayment({ ...tx, meta: { ...tx.meta, err: null } }, quote, paymentConfig);
+          return { ok: false, terminal: true, statusText: 'Payment failed on chain. No items were granted.' };
+        }
+      }
+    } catch { /* Missing or inconsistent chain evidence remains pending. */ }
+    return pending;
+  }
+  let before, missingMemoLookups = 0;
+  for (let page = 0; page < 5; page++) {
+    const records = await connection.getSignaturesForAddress(new PublicKey(quote.walletAddress),
+      { limit: 100, ...(before ? { before } : {}) }, 'confirmed');
+    for (const record of records) {
+      if (record.err || (Number.isFinite(record.blockTime) &&
+        (record.blockTime * 1000 < quote.issuedAt - MAX_CLOCK_SKEW_MS || record.blockTime * 1000 > quote.expiresAt + MAX_CLOCK_SKEW_MS))) continue;
+      const matchingMemo = typeof record.memo === 'string' && record.memo.includes(`${MEMO_PREFIX}${quote.id}`);
+      const unknownMemo = record.memo == null && missingMemoLookups < 20;
+      if (!matchingMemo && !unknownMemo) continue;
+      if (unknownMemo) missingMemoLookups++;
+      try { return await verifyPurchase(player, { quoteToken: input.quoteToken, signature: record.signature }); }
+      catch { /* A candidate may be unrelated or not available at the RPC yet. */ }
+    }
+    if (records.length < 100 || records.some(r => Number.isFinite(r.blockTime)
+      && r.blockTime * 1000 < quote.issuedAt - MAX_CLOCK_SKEW_MS)) break;
+    before = records[records.length - 1].signature;
+  }
+  return pending;
 }
 
 function validateQuote(quote, config, player) {
@@ -559,6 +617,7 @@ module.exports = {
   getWalletBalances,
   verifyPayment,
   verifyPurchase,
+  recoverPurchase,
   submitPurchase,
   getConfig,
 };

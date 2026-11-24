@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const storageConfig = require('../config/storageConfig');
 const database = require('../database');
 const ledgerStore = require('./ledgerStore');
+const referralStore = require('./referralStore');
 
 const TABLE_NAME = 'battlecity_economy_accounts';
 const localMutations = new Map();
@@ -142,7 +143,8 @@ async function refillFuel(account) {
   const previous = Date.parse(account.fuelRefillAt);
   const intervals = Math.floor((now - previous) / FUEL_REFILL_INTERVAL_MS);
   if (intervals < 1) return account;
-  const amount = Math.max(0, SHOP_STARTING_FUEL_BALANCE - account.fuelBalance);
+  const refillCap = SHOP_STARTING_FUEL_BALANCE + (await referralStore.hasReferrer(account.playerId) ? 1 : 0);
+  const amount = Math.max(0, refillCap - account.fuelBalance);
   // Advance even when full: unused intervals never become banked grants.
   account.fuelRefillAt = new Date(previous + intervals * FUEL_REFILL_INTERVAL_MS).toISOString();
   account.fuelBalance += amount;

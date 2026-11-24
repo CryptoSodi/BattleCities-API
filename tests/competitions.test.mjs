@@ -17,6 +17,7 @@ const shop = require('../src/services/shopPaymentService');
 const rpc = require('../src/services/solanaRpc');
 const skr = require('../src/services/skrToken');
 const delivery = require('../src/services/rankingPayoutDelivery');
+const referrals = require('../src/stores/referralStore');
 let root;
 const walletKeypair = Keypair.generate();
 const wallet = walletKeypair.publicKey.toBase58();
@@ -110,6 +111,9 @@ test('buying a pass includes every eligible earlier season match and preserves c
 
 test('SOL pass purchases verify exact transfer amounts and survive repeated verification', async (t) => {
   const current = { ...season, startsAt: new Date(Date.now() - 86400000).toISOString(), endsAt: new Date(Date.now() + 86400000).toISOString() };
+  const referrer = await players.findOrCreateWalletPlayer(Keypair.generate().publicKey.toBase58());
+  const referral = await referrals.ensureProfile(referrer);
+  await referrals.applyCode(player, referral.code);
   await fs.writeFile(path.join(root, 'seasons', 'seasons.json'), JSON.stringify([current]));
   await config.update(settings(), 'ply-admin');
   t.mock.method(Connection.prototype, 'getLatestBlockhash', async () => ({ blockhash: Keypair.generate().publicKey.toBase58(), lastValidBlockHeight: 100 }));
@@ -125,9 +129,14 @@ test('SOL pass purchases verify exact transfer amounts and survive repeated veri
   const signature = '3'.repeat(88);
   await assert.rejects(shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature }), /does not match/);
   assert.equal(await store.getPass(player.id, current.id), null);
+  assert.deepEqual((await referrals.ensureProfile(referrer)).rewards, []);
   amount = 100000000;
   assert.equal((await shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature })).seasonPass.eligibleFrom, current.startsAt);
   assert.equal((await shop.verifyPurchase(player, { quoteToken: quote.quoteToken, signature })).statusText, 'PURCHASE ALREADY VERIFIED');
+  const rewards = (await referrals.ensureProfile(referrer)).rewards;
+  assert.equal(rewards.length, 1);
+  assert.equal(rewards[0].amount, '0.001');
+  assert.equal(rewards[0].currency, 'sol');
 });
 
 async function signedQuote(t, principal = player) {
@@ -142,6 +151,70 @@ async function signedQuote(t, principal = player) {
   tx.sign(walletKeypair);
   return { quote, tx, input: { quoteToken: quote.quoteToken, signedTransaction: tx.serialize().toString('base64') } };
 }
+
+test('wallet-submitted purchases recover a lost signature and grant only once', async (t) => {
+  const { quote, tx } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(tx.signature);
+  const confirmed = { blockTime: Math.floor(Date.now() / 1000), meta: { err: null }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [
+      { program: 'system', parsed: { type: 'transfer', info: { source: wallet, destination: shop.TREASURY, lamports: 100000000 } } },
+      { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` },
+    ],
+  } } };
+  let searches = 0;
+  const connection = { getSignaturesForAddress: async key => {
+    assert.equal(key.toBase58(), wallet); searches++;
+    return [{ signature, memo: `[49] BATC-SHOP-V1:${payload.id}`, err: null, blockTime: confirmed.blockTime }];
+  } };
+  t.mock.method(rpc, 'getTransaction', async value => value === signature ? confirmed : null);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).ok, true);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).statusText, 'PURCHASE ALREADY VERIFIED');
+  assert.equal(searches, 1);
+  await assert.rejects(shop.recoverPurchase({ ...player, id: 'other' }, { quoteToken: quote.quoteToken }, connection), /Quote does not match/);
+});
+
+test('wallet payment recovery never treats an absent or invalid transaction as unpaid', async (t) => {
+  const { quote } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const connection = { getSignaturesForAddress: async () => [{ signature: '3'.repeat(88),
+    memo: `BATC-SHOP-V1:${payload.id}`, err: null, blockTime: Math.floor(Date.now() / 1000) }] };
+  let candidate = null;
+  t.mock.method(rpc, 'getTransaction', async () => candidate);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).pending, true);
+  candidate = { blockTime: Math.floor(Date.now() / 1000), meta: { err: null }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [
+      { program: 'system', parsed: { type: 'transfer', info: { source: wallet, destination: shop.TREASURY, lamports: 1 } } },
+      { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` },
+    ],
+  } } };
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).pending, true);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken },
+    { getSignaturesForAddress: async () => [] })).pending, true);
+  assert.equal(await store.getPass(player.id, season.id), null);
+});
+
+test('a known wallet-submitted payment is released only after a matching finalized failure', async (t) => {
+  const { quote } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const signature = '3'.repeat(88);
+  const tx = { blockTime: Math.floor(Date.now() / 1000), meta: { err: { failure: true } }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [
+      { program: 'system', parsed: { type: 'transfer', info: { source: wallet, destination: shop.TREASURY, lamports: 1 } } },
+      { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` },
+    ],
+  } } };
+  const status = { err: { failure: true }, confirmationStatus: 'finalized' };
+  const connection = { getSignatureStatuses: async () => ({ value: [status] }) };
+  t.mock.method(rpc, 'getTransaction', async () => tx);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).pending, true);
+  tx.transaction.message.instructions[0].parsed.info.lamports = 100000000;
+  status.confirmationStatus = 'confirmed';
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).pending, true);
+  status.confirmationStatus = 'finalized';
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).terminal, true);
+});
 
 test('Cherry quote includes attribution in the server-signed payment message', async (t) => {
   const cherry = { ...player, cherryIdentity: true };

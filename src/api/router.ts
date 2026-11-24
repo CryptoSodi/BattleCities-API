@@ -15,6 +15,7 @@ import * as adminXCommentTasks from '../routes/admin/xCommentTasks';
 import * as adminReplays from '../routes/admin/replays';
 import * as adminSession from '../routes/admin/session';
 import * as economyAccount from '../routes/economy/account';
+import * as referrals from '../routes/referrals';
 import * as economyConsumeFuel from '../routes/economy/consume-fuel';
 import * as economyConsumePowerup from '../routes/economy/consume-powerup';
 import * as economyRedeemPowerup from '../routes/economy/redeem-powerup';
@@ -90,6 +91,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'leaderboard/cycles': leaderboardHistory,
   'leaderboard/payouts': leaderboardHistory,
   'economy/account': economyAccount,
+  referrals,
   'economy/powerups/consume': economyConsumePowerup,
   'economy/powerups/redeem': economyRedeemPowerup,
   'economy/powerups/refund': economyRefundPowerup,
