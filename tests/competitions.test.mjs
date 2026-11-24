@@ -166,7 +166,7 @@ test('wallet-submitted purchases recover a lost signature and grant only once', 
   let searches = 0;
   const connection = { getSignaturesForAddress: async key => {
     assert.equal(key.toBase58(), wallet); searches++;
-    return [{ signature, memo: `[49] BATC-SHOP-V1:${payload.id}`, err: null, blockTime: confirmed.blockTime }];
+    return [{ signature, memo: null, err: null, blockTime: confirmed.blockTime }];
   } };
   t.mock.method(rpc, 'getTransaction', async value => value === signature ? confirmed : null);
   assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).ok, true);
@@ -214,6 +214,7 @@ test('a known wallet-submitted payment is released only after a matching finaliz
   assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).pending, true);
   status.confirmationStatus = 'finalized';
   assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).terminal, true);
+  assert.equal(await store.getPass(player.id, season.id), null);
 });
 
 test('Cherry quote includes attribution in the server-signed payment message', async (t) => {
