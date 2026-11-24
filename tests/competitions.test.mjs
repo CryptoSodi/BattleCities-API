@@ -143,6 +143,55 @@ async function signedQuote(t, principal = player) {
   return { quote, tx, input: { quoteToken: quote.quoteToken, signedTransaction: tx.serialize().toString('base64') } };
 }
 
+test('wallet-submitted checkout recovers a lost signature and grants once', async (t) => {
+  const { quote, tx } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const bs58Module = require('bs58'), bs58 = bs58Module.default || bs58Module;
+  const signature = bs58.encode(tx.signature);
+  let transaction = { blockTime: Math.floor(Date.now() / 1000), meta: { err: null }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [
+      { program: 'system', parsed: { type: 'transfer', info: { source: wallet, destination: shop.TREASURY, lamports: 100000000 } } },
+      { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` },
+    ],
+  } } };
+  let memo = null, searches = 0;
+  const connection = { getSignaturesForAddress: async key => {
+    assert.equal(key.toBase58(), wallet); searches++;
+    return [{ signature, memo, err: null, blockTime: transaction.blockTime }];
+  } };
+  t.mock.method(rpc, 'getTransaction', async value => value === signature ? transaction : null);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).ok, true);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).statusText, 'PURCHASE ALREADY VERIFIED');
+  assert.equal(searches, 1);
+  await assert.rejects(shop.recoverPurchase({ ...player, id: 'other' }, { quoteToken: quote.quoteToken }, connection), /Quote does not match/);
+});
+
+test('wallet recovery keeps uncertain and mismatched payments pending', async (t) => {
+  const { quote } = await signedQuote(t);
+  const payload = JSON.parse(Buffer.from(quote.quoteToken.split('.')[0], 'base64url'));
+  const signature = '3'.repeat(88);
+  let tx = null, status = null;
+  const connection = { getSignaturesForAddress: async () => [{ signature,
+    memo: `BATC-SHOP-V1:${payload.id}`, err: null, blockTime: Math.floor(Date.now() / 1000) }],
+    getSignatureStatuses: async () => ({ value: [status] }) };
+  t.mock.method(rpc, 'getTransaction', async () => tx);
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken }, connection)).pending, true);
+  tx = { blockTime: Math.floor(Date.now() / 1000), meta: { err: { failure: true } }, transaction: { message: {
+    accountKeys: [{ pubkey: wallet, signer: true }], instructions: [
+      { program: 'system', parsed: { type: 'transfer', info: { source: wallet, destination: shop.TREASURY, lamports: 1 } } },
+      { program: 'spl-memo', parsed: `BATC-SHOP-V1:${payload.id}` },
+    ],
+  } } };
+  status = { err: { failure: true }, confirmationStatus: 'finalized' };
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).pending, true);
+  tx.transaction.message.instructions[0].parsed.info.lamports = 100000000;
+  status.confirmationStatus = 'confirmed';
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).pending, true);
+  status.confirmationStatus = 'finalized';
+  assert.equal((await shop.recoverPurchase(player, { quoteToken: quote.quoteToken, signature }, connection)).terminal, true);
+  assert.equal(await store.getPass(player.id, season.id), null);
+});
+
 test('Cherry quote includes attribution in the server-signed payment message', async (t) => {
   const cherry = { ...player, cherryIdentity: true };
   const { quote, tx, input } = await signedQuote(t, cherry);

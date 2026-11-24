@@ -32,7 +32,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const result = await shopPaymentService.verifyPurchase(player, body);
+    const result = body?.recover === true
+      ? await shopPaymentService.recoverPurchase(player, body)
+      : await shopPaymentService.verifyPurchase(player, body);
     return json(request, result);
   } catch (error) {
     return json(request, {
