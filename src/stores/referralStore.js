@@ -131,4 +131,4 @@ async function accruePayment(record) {
     WHERE referred_player_id=$4 AND created_at <= $5 ON CONFLICT (payment_signature) DO NOTHING`,
     [record.signature, record.currency, amount, record.playerId, record.eligibleAt || record.confirmedAt, record.network, record.mint, record.tokenProgram, record.decimals]);
 }
-module.exports = { ensureProfile, dismissPrompt, applyCode, hasReferrer, accruePayment, codeFromInput };
+module.exports = { ensureProfile, dismissPrompt, applyCode, hasReferrer, accruePayment, codeFromInput, formatAmount };

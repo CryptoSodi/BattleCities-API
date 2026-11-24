@@ -1,5 +1,6 @@
 const database = require('../database');
 const storageConfig = require('../config/storageConfig');
+const { formatAmount } = require('./referralStore');
 
 const MATCH_STATUSES = new Set(['pending', 'accepted', 'rejected']);
 
@@ -274,6 +275,55 @@ function fromPlayerRow(row) {
   };
 }
 
+async function listReferrers(options = {}) {
+  assertPersistentStorage();
+  await database.assertMigrationsApplied();
+  const limit = clampInteger(options.limit ?? 50, 1, 100, 50);
+  const offset = clampInteger(options.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+  const result = await database.getPool().query(`
+    WITH referral_counts AS (
+      SELECT referrer_player_id AS player_id, COUNT(*) AS referred_count
+      FROM battlecity_referrals
+      GROUP BY referrer_player_id
+    ), ranked_page AS (
+      SELECT player_id, referred_count, RANK() OVER (ORDER BY referred_count DESC) AS rank
+      FROM referral_counts
+      ORDER BY referred_count DESC, player_id
+      LIMIT $1 OFFSET $2
+    )
+    SELECT page.player_id, p.display_name, p.wallet_address, page.referred_count, page.rank,
+      COALESCE(earnings.totals, '[]'::jsonb) AS rewards
+    FROM ranked_page page
+    JOIN battlecity_players p ON p.id = page.player_id
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(jsonb_build_object(
+        'currency', currency, 'network', network, 'mint', token_mint,
+        'tokenProgram', token_program, 'decimals', decimals, 'amountAtomic', amount_atomic
+      ) ORDER BY currency, network, token_mint, token_program, decimals) AS totals
+      FROM (
+        SELECT currency, network, token_mint, token_program, decimals, SUM(amount_atomic)::text AS amount_atomic
+        FROM battlecity_referral_rewards
+        WHERE referrer_player_id = page.player_id
+        GROUP BY currency, network, token_mint, token_program, decimals
+      ) grouped
+    ) earnings ON true
+    ORDER BY page.referred_count DESC, page.player_id
+  `, [limit + 1, offset]);
+  return {
+    items: result.rows.slice(0, limit).map((row) => ({
+      playerId: row.player_id,
+      displayName: row.display_name,
+      walletAddress: row.wallet_address,
+      referredCount: Number(row.referred_count),
+      rank: Number(row.rank),
+      rewards: row.rewards.map((reward) => ({ ...reward, amount: formatAmount(reward.amountAtomic, reward.decimals) })),
+    })),
+    limit,
+    offset,
+    hasMore: result.rows.length > limit,
+  };
+}
+
 function clampInteger(value, min, max, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
@@ -283,4 +333,4 @@ function toIso(value) {
   return value == null ? null : new Date(value).toISOString();
 }
 
-module.exports = { getOverview, getReplay, listMatches, listPlayers, listReplays };
+module.exports = { getOverview, getReplay, listMatches, listPlayers, listReferrers, listReplays };

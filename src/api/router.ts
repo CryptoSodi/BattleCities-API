@@ -7,6 +7,7 @@ import * as leaderboardHistory from '../routes/leaderboardHistory';
 import * as adminMatches from '../routes/admin/matches';
 import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
+import * as adminReferrals from '../routes/admin/referrals';
 import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
 import * as adminLiveUsers from '../routes/admin/liveUsers';
 import * as adminNotifications from '../routes/admin/notifications';
@@ -76,6 +77,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/x/comment-tasks': adminXCommentTasks,
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
+  'admin/referrals': adminReferrals,
   'admin/replays': adminReplays,
   'admin/replays/unity': adminUnityReplays,
   'admin/session': adminSession,
