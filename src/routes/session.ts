@@ -59,14 +59,18 @@ export async function POST(request: Request): Promise<Response> {
     return json(request, { error: 'Unsupported login provider' }, 400);
   }
 
-  if (
-    !(await walletAuth.verifyChallenge({
+  const verified = body.method === 'siws'
+    ? await walletAuth.verifySignInChallenge({
+      walletAddress: body.walletAddress, nonce: body.nonce,
+      signedMessage: body.signedMessage, signature: body.signature, signatureType: body.signatureType,
+    })
+    : await walletAuth.verifyChallenge({
       walletAddress: body.walletAddress,
       nonce: body.nonce,
       message: body.message,
       signature: body.signature,
-    }))
-  ) {
+    });
+  if (!verified) {
     return json(request, { error: 'Invalid wallet signature' }, 401);
   }
 
@@ -91,14 +95,16 @@ export async function PUT(request: Request): Promise<Response> {
     return json(request, { error: 'Invalid JSON' }, 400);
   }
 
-  if (!walletAuth.isValidWalletAddress(body?.walletAddress)) {
+  if (body?.method !== 'siws' && !walletAuth.isValidWalletAddress(body?.walletAddress)) {
     return json(request, { error: 'Invalid wallet address' }, 400);
   }
 
   if (!rateLimiter.allow('wallet-challenge', request.headers.get('x-forwarded-for') || 'local')) {
     return json(request, { error: 'Too many requests' }, 429);
   }
-  const challenge = await walletAuth.createChallenge(body.walletAddress);
+  const challenge = body?.method === 'siws'
+    ? await walletAuth.createSignInChallenge()
+    : await walletAuth.createChallenge(body.walletAddress);
 
   return json(request, challenge, 201);
 }

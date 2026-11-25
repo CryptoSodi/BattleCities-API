@@ -44,6 +44,11 @@ Calls are relative to `/api`. Session responses set an HTTP-only
   challenge (`nonce`, `message`). Sign the exact UTF-8 message with the wallet.
 - `POST /session` with `provider: "wallet"`, `walletAddress`, `nonce`, `message`
   and the base64 `signature` authenticates a wallet. Challenges are single-use.
+- Android SIWS clients can instead `PUT /session` with `{ "method": "siws" }`
+  to receive server-owned sign-in `input` before connecting a wallet. Submit
+  `provider: "wallet"`, `method: "siws"`, `walletAddress`, `nonce`, and the
+  base64 `signedMessage` and `signature` to `POST /session`. The API checks
+  the signed SIWS fields, address, expiry and signature and consumes the nonce.
 - `GET /session` reads the session; `DELETE /session` logs out.
 - `GET/PUT /player` reads progress or merges personal high scores.
 - `GET /players/{id}/profile` reads the profile and paginated recent battles.

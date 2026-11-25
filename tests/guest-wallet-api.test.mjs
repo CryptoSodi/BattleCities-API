@@ -8,6 +8,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 const require = createRequire(import.meta.url);
 const app = require('../dist/src/app').default;
 const bs58 = require('bs58').default;
+const { createSignInMessage } = require('@solana/wallet-standard-util');
 let root;
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'battlecities-identity-'));
@@ -72,6 +73,46 @@ test('wallet challenge signs the exact message and allows one concurrent use', a
   assert.equal(session.walletAddress, address); assert.equal(session.provider, 'wallet');
   assert.equal((await call('admin/session', 'GET', undefined, cookie)).status, 403);
   assert.equal((await call('session', 'POST', payload)).status, 401);
+});
+
+test('SIWS binds the server challenge to the signing account and is single-use', async () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const address = bs58.encode(publicKey.export({ format: 'der', type: 'spki' }).subarray(-32));
+  const challengeResponse = await call('session', 'PUT', { method: 'siws' });
+  assert.equal(challengeResponse.status, 201);
+  const { input } = await challengeResponse.json();
+  const message = createSignInMessage({ ...input, address });
+  const payload = { provider: 'wallet', method: 'siws', walletAddress: address, nonce: input.nonce,
+    signedMessage: Buffer.from(message).toString('base64'),
+    signature: crypto.sign(null, message, privateKey).toString('base64'), signatureType: 'ed25519' };
+  const otherAddress = bs58.encode(crypto.generateKeyPairSync('ed25519').publicKey.export({ format: 'der', type: 'spki' }).subarray(-32));
+  assert.equal((await call('session', 'POST', { ...payload, walletAddress: otherAddress })).status, 401);
+  const wrongAccountMessage = createSignInMessage({ ...input, address: otherAddress });
+  assert.equal((await call('session', 'POST', { ...payload, signedMessage: Buffer.from(wrongAccountMessage).toString('base64'),
+    signature: crypto.sign(null, wrongAccountMessage, privateKey).toString('base64') })).status, 401);
+  assert.equal((await call('session', 'POST', { ...payload, signature: Buffer.alloc(64).toString('base64') })).status, 401);
+  const tampered = createSignInMessage({ ...input, address, domain: 'evil.example' });
+  assert.equal((await call('session', 'POST', { ...payload, signedMessage: Buffer.from(tampered).toString('base64'),
+    signature: crypto.sign(null, tampered, privateKey).toString('base64') })).status, 401);
+  assert.equal((await call('session', 'POST', { ...payload, signatureType: 'other' })).status, 401);
+  const responses = await Promise.all([call('session', 'POST', payload), call('session', 'POST', payload)]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, 401]);
+  assert.equal((await responses.find((response) => response.status === 201).json()).walletAddress, address);
+  assert.equal((await call('session', 'POST', payload)).status, 401);
+});
+
+test('SIWS rejects an expired challenge', async () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const address = bs58.encode(publicKey.export({ format: 'der', type: 'spki' }).subarray(-32));
+  const { input } = await (await call('session', 'PUT', { method: 'siws' })).json();
+  const file = path.join(root, 'WALLET_CHALLENGE', `${input.nonce}.json`);
+  const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+  stored.createdAt = new Date(Date.now() - 360000).toISOString();
+  await fs.writeFile(file, JSON.stringify(stored));
+  const message = createSignInMessage({ ...input, address });
+  assert.equal((await call('session', 'POST', { provider: 'wallet', method: 'siws', walletAddress: address,
+    nonce: input.nonce, signedMessage: Buffer.from(message).toString('base64'),
+    signature: crypto.sign(null, message, privateKey).toString('base64') })).status, 401);
 });
 
 test('legacy Google sessions and identities cannot authenticate, authorize or expose profiles', async () => {

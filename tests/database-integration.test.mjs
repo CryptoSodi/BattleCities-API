@@ -1,8 +1,33 @@
 import assert from 'assert/strict';
 import { createRequire } from 'module';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 const testDatabaseUrl = process.env.BATTLECITY_TEST_DATABASE_URL;
+
+test('SIWS challenges persist and are consumed in PostgreSQL', { skip: !testDatabaseUrl }, async () => {
+  process.env.DATABASE_URL = testDatabaseUrl;
+  process.env.BATTLECITY_STORAGE_MODE = 'postgres';
+  const require = createRequire(import.meta.url);
+  const database = require('../src/database');
+  const auth = require('../src/services/walletAuth');
+  const bs58 = require('bs58').default;
+  const { createSignInMessage } = require('@solana/wallet-standard-util');
+  try {
+    await database.assertMigrationsApplied();
+    await database.withTransaction(async () => {
+      await database.getPool().query('CREATE TEMP TABLE battlecity_wallet_challenges (LIKE public.battlecity_wallet_challenges INCLUDING DEFAULTS) ON COMMIT DROP');
+      const { input } = await auth.createSignInChallenge();
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+      const address = bs58.encode(publicKey.export({ format: 'der', type: 'spki' }).subarray(-32));
+      const message = createSignInMessage({ ...input, address });
+      const proof = { walletAddress: address, nonce: input.nonce, signedMessage: Buffer.from(message).toString('base64'),
+        signature: crypto.sign(null, message, privateKey).toString('base64') };
+      assert.equal(await auth.verifySignInChallenge(proof), true);
+      assert.equal(await auth.verifySignInChallenge(proof), false);
+    });
+  } finally { await database.closePool(); }
+});
 
 test(
   'configured test database has the latest migration and is reachable',

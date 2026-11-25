@@ -3,11 +3,13 @@ const path = require('path');
 const crypto = require('crypto');
 const storageConfig = require('../config/storageConfig');
 const database = require('../database');
+const { verifySignIn } = require('@solana/wallet-standard-util');
 
 const TABLE_NAME = 'battlecity_wallet_challenges';
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const SIWS_MARKER = '__siws__';
 
 function getDataDir() {
   return (
@@ -50,6 +52,29 @@ async function createChallenge(walletAddress) {
   };
   challenge.message = createMessage(walletAddress, challenge.nonce);
 
+  await saveChallenge(challenge);
+  return toPublicChallenge(challenge);
+}
+
+// The address is supplied by the wallet after authorization; the server owns
+// every other input and persists it until the nonce is consumed.
+async function createSignInChallenge() {
+  const createdAt = new Date();
+  const input = {
+    domain: 'battlecities.com',
+    statement: 'Sign in to Battle Cities.',
+    uri: 'https://battlecities.com',
+    version: '1',
+    nonce: createNonce(),
+    issuedAt: createdAt.toISOString(),
+    expirationTime: new Date(createdAt.getTime() + CHALLENGE_TTL_MS).toISOString(),
+  };
+  await saveChallenge({ nonce: input.nonce, walletAddress: SIWS_MARKER,
+    message: JSON.stringify(input), createdAt: input.issuedAt, usedAt: null });
+  return { method: 'siws', input };
+}
+
+async function saveChallenge(challenge) {
   if (hasPersistentConfig()) {
     await ensureSchema();
     await getPgPool().query(
@@ -66,7 +91,7 @@ async function createChallenge(walletAddress) {
         challenge.usedAt,
       ],
     );
-    return toPublicChallenge(challenge);
+    return;
   }
 
   await ensureDataDir();
@@ -76,7 +101,32 @@ async function createChallenge(walletAddress) {
     'utf8',
   );
 
-  return toPublicChallenge(challenge);
+}
+
+async function verifySignInChallenge({ walletAddress, nonce, signedMessage, signature, signatureType }) {
+  if (!isValidWalletAddress(walletAddress) || !isValidNonce(nonce) ||
+      typeof signedMessage !== 'string' || signedMessage.length > 8192 ||
+      typeof signature !== 'string' || signature.length > 128 ||
+      (signatureType != null && signatureType !== 'ed25519')) return false;
+  const challenge = await readChallenge(nonce);
+  if (!challenge || challenge.usedAt !== null || challenge.walletAddress !== SIWS_MARKER ||
+      !Number.isFinite(Date.parse(challenge.createdAt)) ||
+      Date.now() - Date.parse(challenge.createdAt) > CHALLENGE_TTL_MS ||
+      Date.parse(challenge.createdAt) > Date.now()) return false;
+  try {
+    const input = JSON.parse(challenge.message);
+    if (input.nonce !== nonce || input.issuedAt !== challenge.createdAt ||
+        Date.parse(input.expirationTime) <= Date.now()) return false;
+    const publicKey = decodeBase58(walletAddress);
+    const messageBytes = Buffer.from(signedMessage, 'base64');
+    const signatureBytes = Buffer.from(signature, 'base64');
+    if (publicKey.length !== 32 || signatureBytes.length !== 64 || messageBytes.length === 0 ||
+        messageBytes.length > 4096) return false;
+    const valid = verifySignIn({ ...input, address: walletAddress }, {
+      account: { publicKey }, signedMessage: messageBytes, signature: signatureBytes,
+    });
+    return valid ? markChallengeUsed(nonce) : false;
+  } catch { return false; }
 }
 
 async function verifyChallenge({ walletAddress, nonce, message, signature }) {
@@ -249,6 +299,8 @@ function decodeBase58(value) {
 
 module.exports = {
   createChallenge,
+  createSignInChallenge,
   isValidWalletAddress,
   verifyChallenge,
+  verifySignInChallenge,
 };
