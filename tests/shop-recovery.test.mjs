@@ -153,6 +153,7 @@ test('worker recovers a payment after the client disappears and grants the item 
       assert.equal((await recovery.track(player, { quoteToken: token })).status, 'confirmed');
       assert.equal((await db.getPool().query('SELECT 1 FROM battlecity_shop_purchase_attempts WHERE quote_id = $1', [quote.id])).rowCount, 0);
     } finally {
+      await db.getPool().query('DELETE FROM battlecity_ledger_entries WHERE player_id = $1', [player.id]);
       await db.getPool().query('DELETE FROM battlecity_players WHERE id = $1', [player.id]);
       await db.closePool();
       if (previousSecret === undefined) delete process.env.BATTLECITY_SHOP_QUOTE_SECRET;
@@ -197,6 +198,7 @@ test('worker finds a submitted payment by quote memo when the wallet returns no 
       assert.equal((await shop.recoverPurchase(player, { quoteToken: token })).ok, true);
       assert.equal((await economy.readAccount(player.id)).fuelBalance, before.fuelBalance + 1);
     } finally {
+      await db.getPool().query('DELETE FROM battlecity_ledger_entries WHERE player_id = $1', [player.id]);
       await db.getPool().query('DELETE FROM battlecity_players WHERE id = $1', [player.id]);
       await db.closePool();
       if (previousSecret === undefined) delete process.env.BATTLECITY_SHOP_QUOTE_SECRET;
