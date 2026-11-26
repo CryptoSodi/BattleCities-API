@@ -8,6 +8,7 @@ import * as adminMatches from '../routes/admin/matches';
 import * as adminOverview from '../routes/admin/overview';
 import * as adminPlayers from '../routes/admin/players';
 import * as adminReferrals from '../routes/admin/referrals';
+import * as adminPendingPurchases from '../routes/admin/pendingPurchases';
 import * as adminPlayerXConnection from '../routes/admin/playerXConnection';
 import * as adminLiveUsers from '../routes/admin/liveUsers';
 import * as adminNotifications from '../routes/admin/notifications';
@@ -28,6 +29,7 @@ import * as economyLedger from '../routes/economy/ledger';
 import * as economyPurchaseQuote from '../routes/economy/purchaseQuote';
 import * as economyPurchaseVerify from '../routes/economy/purchaseVerify';
 import * as economyPurchaseSubmit from '../routes/economy/purchaseSubmit';
+import * as economyPurchaseTrack from '../routes/economy/purchaseTrack';
 import * as economyWalletBalance from '../routes/economy/walletBalance';
 import * as health from '../routes/health';
 import * as leaderboardRewards from '../routes/leaderboardRewards';
@@ -78,6 +80,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'admin/overview': adminOverview,
   'admin/players': adminPlayers,
   'admin/referrals': adminReferrals,
+  'admin/pending-purchases': adminPendingPurchases,
   'admin/replays': adminReplays,
   'admin/replays/unity': adminUnityReplays,
   'admin/session': adminSession,
@@ -106,6 +109,7 @@ const routes: { [path: string]: { [method: string]: RouteHandler } } = {
   'economy/purchase/quote': economyPurchaseQuote,
   'economy/purchase/verify': economyPurchaseVerify,
   'economy/purchase/submit': economyPurchaseSubmit,
+  'economy/purchase/track': economyPurchaseTrack,
   'economy/wallet-balance': economyWalletBalance,
   health,
   'integrations/discord/interactions': discordInteractions,

@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const storageConfig = require('./config/storageConfig');
 
-const REQUIRED_MIGRATION = '036_referrals';
+const REQUIRED_MIGRATION = '037_shop_purchase_recovery';
 const transactionStorage = new AsyncLocalStorage();
 
 let pool = null;

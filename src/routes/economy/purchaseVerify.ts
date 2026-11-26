@@ -7,6 +7,7 @@ const rateLimiter = require('../../services/rateLimiter');
 const sessionIdentity = require('../../services/sessionIdentity');
 const sessionStore = require('../../stores/sessionStore');
 const shopPaymentService = require('../../services/shopPaymentService');
+const shopRecovery = require('../../services/shopRecovery');
 
 export function OPTIONS(request: Request): Response {
   return createOptionsResponse(request);
@@ -32,6 +33,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    // Older clients bring their locally saved receipt on their next check.
+    if (body?.recover === true) await shopRecovery.track(player, body);
     const result = body?.recover === true
       ? await shopPaymentService.recoverPurchase(player, body)
       : await shopPaymentService.verifyPurchase(player, body);

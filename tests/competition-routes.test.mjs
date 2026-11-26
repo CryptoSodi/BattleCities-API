@@ -8,6 +8,8 @@ const require = createRequire(import.meta.url);
 const base = '../dist/src/';
 const admin = require(base + 'routes/admin/competitions');
 const adminReferrals = require(base + 'routes/admin/referrals');
+const adminPendingPurchases = require(base + 'routes/admin/pendingPurchases');
+const purchaseTrack = require(base + 'routes/economy/purchaseTrack');
 const reviews = require(base + 'routes/admin/matchReviews');
 const catalog = require(base + 'routes/economy/catalog');
 const history = require(base + 'routes/leaderboardHistory');
@@ -36,7 +38,8 @@ const req = (pathname, method = 'GET', body) => new Request('https://api.battlec
 test('new private endpoints reject unauthenticated access', async () => {
   for (const [handler, pathname, method] of [[admin.GET, 'admin/competitions', 'GET'],
     [admin.PUT, 'admin/competitions', 'PUT'], [reviews.POST, 'admin/match-reviews', 'POST'],
-    [adminReferrals.GET, 'admin/referrals', 'GET'],
+    [adminReferrals.GET, 'admin/referrals', 'GET'], [adminPendingPurchases.GET, 'admin/pending-purchases', 'GET'],
+    [purchaseTrack.POST, 'economy/purchase/track', 'POST'],
     [native.POST, 'integrations/x/oauth/native/start', 'POST'], [native.GET, 'integrations/oauth/native/status', 'GET'],
     [swap.POST, 'trading/swap/quote', 'POST'], [submit.POST, 'economy/purchase/submit', 'POST']]) {
     assert.equal((await handler(req(pathname, method))).status, 401);
@@ -60,6 +63,42 @@ test('referral rankings reject ordinary players and pass pagination through for 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { ok: true, ...report });
   assert.deepEqual(list.mock.calls[0].arguments, [{ limit: '50', offset: '100' }]);
+});
+
+test('pending purchases reject non-admin players and expose only the paginated admin report', async (t) => {
+  const attempts = require(base + 'stores/shopAttemptStore');
+  t.mock.method(identity, 'resolveSession', () => 'session-test');
+  let walletAddress = Keypair.generate().publicKey.toBase58();
+  t.mock.method(sessions, 'readSession', async () => ({ playerId: 'ply-test', provider: 'wallet', walletAddress }));
+  t.mock.method(players, 'readPlayer', async () => ({ id: 'ply-test', provider: 'wallet', walletAddress }));
+  const report = { items: [], limit: 50, offset: 100, hasMore: false };
+  const list = t.mock.method(attempts, 'listPending', async () => report);
+  const request = () => req('admin/pending-purchases?limit=50&offset=100');
+  assert.equal((await adminPendingPurchases.GET(request())).status, 403);
+  assert.equal(list.mock.callCount(), 0);
+  walletAddress = '9YpW9nYJaUVhRwqWaJBBh9wkjCYh5RLr6krYvfr7GGKo';
+  const response = await adminPendingPurchases.GET(request());
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, ...report });
+  assert.deepEqual(list.mock.calls[0].arguments, [{ limit: '50', offset: '100' }]);
+});
+
+test('purchase tracking requires the authenticated wallet player', async (t) => {
+  const recovery = require(base + 'services/shopRecovery');
+  t.mock.method(identity, 'resolveSession', () => 'session-test');
+  let provider = 'guest';
+  const walletAddress = Keypair.generate().publicKey.toBase58();
+  t.mock.method(sessions, 'readSession', async () => ({ playerId: 'ply-test', provider, walletAddress }));
+  t.mock.method(players, 'readPlayer', async () => ({ id: 'ply-test', provider, walletAddress }));
+  const track = t.mock.method(recovery, 'track', async () => ({ ok: true, quoteId: 'quote-test', status: 'pending' }));
+  const request = () => req('economy/purchase/track', 'POST', { quoteToken: 'opaque-token' });
+  assert.equal((await purchaseTrack.POST(request())).status, 403);
+  assert.equal(track.mock.callCount(), 0);
+  provider = 'wallet';
+  const response = await purchaseTrack.POST(request());
+  assert.equal(response.status, 200);
+  assert.equal(track.mock.calls[0].arguments[0].walletAddress, walletAddress);
+  assert.deepEqual(track.mock.calls[0].arguments[1], { quoteToken: 'opaque-token' });
 });
 
 test('admin prices are access controlled and immediately reflected in the shop catalog', async (t) => {

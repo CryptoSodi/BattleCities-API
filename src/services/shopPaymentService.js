@@ -417,6 +417,23 @@ async function recoverPurchase(player, input, connection = null) {
   return pending;
 }
 
+function validateRecoveryAttempt(player, input) {
+  const config = getConfig();
+  assertConfigured(config);
+  const quoteToken = String(input?.quoteToken || '');
+  if (quoteToken.length > 12000) throw new Error('Invalid quote token.');
+  const quote = verifyQuoteToken(quoteToken, config.quoteSecret);
+  const token = paymentToken(quote.currency, config);
+  validateQuote(quote, { ...config, tokenMint: new PublicKey(token.mint),
+    tokenProgramId: new PublicKey(token.programId), tokenDecimals: token.decimals }, player);
+  const signature = String(input?.signature || '');
+  if (signature && !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(signature)) throw new Error('Invalid transaction signature.');
+  return { quoteId: quote.id, playerId: quote.playerId, walletAddress: quote.walletAddress,
+    itemId: quote.itemId, currency: quote.currency, amountAtomic: String(quote.amountAtomic),
+    decimals: quote.currency === 'sol' ? 9 : token.decimals, network: quote.network,
+    quoteToken, signature: signature || null, issuedAt: quote.issuedAt, expiresAt: quote.expiresAt };
+}
+
 function validateQuote(quote, config, player) {
   if (![1, 2].includes(quote.v)
     || quote.playerId !== player.id
@@ -618,6 +635,7 @@ module.exports = {
   verifyPayment,
   verifyPurchase,
   recoverPurchase,
+  validateRecoveryAttempt,
   submitPurchase,
   getConfig,
 };

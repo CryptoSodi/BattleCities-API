@@ -15,8 +15,13 @@ test('schema fixture bootstrap leaves an existing database intact', { skip: !pro
   const client = new Client({ connectionString: process.env.BATTLECITY_TEST_DATABASE_URL, ssl: false });
   await client.connect();
   try {
-    const before = await client.query('SELECT count(*)::int AS count FROM battlecity_players');
+    // Other integration tests may insert players concurrently. Compare stable
+    // schema identity and an existing migration record instead of a live count.
+    const state = `SELECT 'public.battlecity_players'::regclass::oid::text AS player_table_oid,
+      version, applied_at FROM battlecity_schema_migrations WHERE version = '031_guest_wallet_auth'`;
+    const before = await client.query(state);
+    assert.equal(before.rowCount, 1);
     await assert.rejects(bootstrapTestDatabase({ NODE_ENV: 'test', DATABASE_URL: process.env.BATTLECITY_TEST_DATABASE_URL }), /restricted|existing tables/);
-    assert.deepEqual((await client.query('SELECT count(*)::int AS count FROM battlecity_players')).rows, before.rows);
+    assert.deepEqual((await client.query(state)).rows, before.rows);
   } finally { await client.end(); }
 });

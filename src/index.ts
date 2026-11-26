@@ -10,7 +10,9 @@ const loadLocalEnv = require('./config/loadLocalEnv');
 const database = require('./database');
 const requestBody = require('./services/requestBody');
 const competitions = require('./services/competitions');
+const shopRecovery = require('./services/shopRecovery');
 let stopCompetitionWorker = () => {};
+let stopShopRecoveryWorker = () => {};
 
 loadLocalEnv.loadLocalEnv();
 
@@ -45,6 +47,7 @@ async function start(): Promise<void> {
     console.log(`[battlecities-api] listening on http://${host}:${port}`);
   });
   stopCompetitionWorker = competitions.startWorker();
+  stopShopRecoveryWorker = shopRecovery.startWorker();
 }
 
 function parsePort(value: unknown, fallback: number): number {
@@ -106,6 +109,7 @@ let shuttingDown = false;
 
 function shutdown(signal: string): void {
   stopCompetitionWorker();
+  stopShopRecoveryWorker();
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[battlecities-api] ${signal} received; shutting down`);
