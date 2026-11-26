@@ -52,7 +52,10 @@ async function tick() {
   } finally { running = false; }
 }
 function startWorker() {
-  if (!storage.hasDatabaseConfig() || process.env.BATTLECITY_SHOP_RECOVERY_WORKER_ENABLED === '0') return () => {};
+  // Deployment validation runs against a production-data copy without the
+  // payment secret. Never scan or update its existing purchase attempts.
+  if (!storage.hasDatabaseConfig() || process.env.BATTLECITY_SHOP_RECOVERY_WORKER_ENABLED === '0'
+      || String(process.env.BATTLECITY_SHOP_QUOTE_SECRET || '').length < 32) return () => {};
   const run = () => tick().catch(() => console.error('[battlecities-api] purchase recovery worker failed'));
   run();
   const timer = setInterval(run, 30000);

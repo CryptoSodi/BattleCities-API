@@ -33,7 +33,7 @@ async function register(attempt) {
   if (!result.rowCount) throw new Error('Purchase attempt does not match the saved record.');
   return result.rows[0];
 }
-async function claim(limit = 10, network) {
+async function claim(limit = 10, network, quoteId = null) {
   requireDatabase();
   if (!network) throw new Error('Recovery network is required.');
   await database.assertMigrationsApplied();
@@ -42,13 +42,14 @@ async function claim(limit = 10, network) {
     WITH due AS (
       SELECT quote_id FROM battlecity_shop_purchase_attempts
       WHERE status = 'pending' AND network = $2 AND next_check_at <= NOW()
+        AND ($3::text IS NULL OR quote_id = $3)
         AND (claimed_until IS NULL OR claimed_until < NOW())
       ORDER BY next_check_at, created_at
       FOR UPDATE SKIP LOCKED LIMIT $1
     )
     UPDATE battlecity_shop_purchase_attempts a
-    SET claim_id = $3, claimed_until = NOW() + INTERVAL '5 minutes'
-    FROM due WHERE a.quote_id = due.quote_id RETURNING a.*`, [limit, network, claimId]);
+    SET claim_id = $4, claimed_until = NOW() + INTERVAL '5 minutes'
+    FROM due WHERE a.quote_id = due.quote_id RETURNING a.*`, [limit, network, quoteId, claimId]);
   return result.rows;
 }
 async function complete(attempt, status, signature = null) {

@@ -9,7 +9,21 @@ const players = require('../src/stores/playerStore');
 const recovery = require('../src/services/shopRecovery');
 const rpc = require('../src/services/solanaRpc');
 const economy = require('../src/stores/economyStore');
+const storage = require('../src/config/storageConfig');
 const recoveryDatabase = process.env.BATTLECITY_SHOP_RECOVERY_TEST_DATABASE_URL || process.env.BATTLECITY_TEST_DATABASE_URL;
+
+test('the worker does not start in validation without the payment secret', t => {
+  const previous = process.env.BATTLECITY_SHOP_QUOTE_SECRET;
+  delete process.env.BATTLECITY_SHOP_QUOTE_SECRET;
+  const claim = t.mock.method(attempts, 'claim', async () => []);
+  t.mock.method(storage, 'hasDatabaseConfig', () => true);
+  try {
+    recovery.startWorker()();
+    assert.equal(claim.mock.callCount(), 0);
+  } finally {
+    if (previous !== undefined) process.env.BATTLECITY_SHOP_QUOTE_SECRET = previous;
+  }
+});
 
 test('recovery registration validates quote authenticity and wallet ownership', () => {
   const previous = process.env.BATTLECITY_SHOP_QUOTE_SECRET;
@@ -76,19 +90,19 @@ test('PostgreSQL stores attempts durably, leases work and enforces quote ownersh
       assert.equal((await attempts.register(item)).status, 'pending');
       await attempts.register(item);
       await assert.rejects(attempts.register({ ...item, playerId: other }), /does not match/);
-      assert.equal((await attempts.claim(1, 'mainnet-beta')).length, 0, 'a different network cannot claim the attempt');
-      const [first, second] = await Promise.all([attempts.claim(1, 'devnet'), attempts.claim(1, 'devnet')]);
+      assert.equal((await attempts.claim(1, 'mainnet-beta', quoteId)).length, 0, 'a different network cannot claim the attempt');
+      const [first, second] = await Promise.all([attempts.claim(1, 'devnet', quoteId), attempts.claim(1, 'devnet', quoteId)]);
       assert.equal(first.length + second.length, 1, 'two workers cannot claim one attempt');
       const leased = first[0] || second[0];
       assert.equal(await attempts.complete({ ...leased, claim_id: 'wrong-lease' }, 'confirmed'), false);
       assert.equal(await attempts.complete(leased, 'pending'), true);
-      assert.equal((await attempts.claim(1, 'devnet')).length, 0, 'uncertain attempts back off');
+      assert.equal((await attempts.claim(1, 'devnet', quoteId)).length, 0, 'uncertain attempts back off');
       const page = await attempts.listPending({ limit: 50 });
       const shown = page.items.find(r => r.quoteId === quoteId);
       assert.equal(shown.amountAtomic, '10000000');
       assert.equal(Object.hasOwn(shown, 'quoteToken'), false, 'admin output does not expose quote tokens');
       await db.getPool().query('UPDATE battlecity_shop_purchase_attempts SET next_check_at = NOW() WHERE quote_id = $1', [quoteId]);
-      const retry = (await attempts.claim(1, 'devnet'))[0];
+      const retry = (await attempts.claim(1, 'devnet', quoteId))[0];
       assert.equal(await attempts.complete(retry, 'confirmed', 'verified-signature'), true);
       assert.equal((await attempts.register(item)).status, 'confirmed', 'reimport cannot reopen a resolved attempt');
       assert.equal((await attempts.listPending({ limit: 50 })).items.some(r => r.quoteId === quoteId), false);
@@ -122,6 +136,8 @@ test('worker recovers a payment after the client disappears and grants the item 
       ],
     } } };
     t.mock.method(rpc, 'getTransaction', async () => chain);
+    const claim = attempts.claim;
+    t.mock.method(attempts, 'claim', (limit, network) => claim(limit, network, quote.id));
     try {
       const before = await economy.ensureAccountForPlayer(player);
       await recovery.track(player, { quoteToken: token, signature });
@@ -169,6 +185,8 @@ test('worker finds a submitted payment by quote memo when the wallet returns no 
     } } };
     t.mock.method(Connection.prototype, 'getSignaturesForAddress', async () => [{ signature, memo, err: null, blockTime: chain.blockTime }]);
     t.mock.method(rpc, 'getTransaction', async () => chain);
+    const claim = attempts.claim;
+    t.mock.method(attempts, 'claim', (limit, network) => claim(limit, network, quote.id));
     try {
       const before = await economy.ensureAccountForPlayer(player);
       await recovery.track(player, { quoteToken: token });
