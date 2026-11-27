@@ -12,6 +12,7 @@ const {
 } = require('@solana/web3.js');
 const {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  ACCOUNT_SIZE,
   TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
@@ -152,6 +153,8 @@ async function createQuote(player, input) {
   // instructions would invalidate its exact-message hash after approval.
   transaction.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0 }));
 
+  let source = null;
+  let destination = null;
   if (currency === 'sol') {
     transaction.add(SystemProgram.transfer({
       fromPubkey: wallet,
@@ -159,14 +162,14 @@ async function createQuote(player, input) {
       lamports: amountAtomic,
     }));
   } else {
-    const source = getAssociatedTokenAddressSync(
+    source = getAssociatedTokenAddressSync(
       tokenMint,
       wallet,
       false,
       tokenProgram,
       ASSOCIATED_TOKEN_PROGRAM_ID,
     );
-    const destination = getAssociatedTokenAddressSync(
+    destination = getAssociatedTokenAddressSync(
       tokenMint,
       config.treasury,
       false,
@@ -212,9 +215,8 @@ async function createQuote(player, input) {
     sigVerify: false,
   });
   if (simulation.value.err) {
-    throw new Error(currency === 'sol'
-      ? 'The payment could not be prepared. Check your SOL balance.'
-      : `The payment could not be prepared. Check your ${currency === 'skr' ? 'SKR' : currency === 'play' ? 'PLAY' : 'BATC'} and SOL balances.`);
+    throw new Error(await describePreparationFailure({ connection, wallet, source, destination,
+      message: simulationTransaction.message, amountAtomic, currency }));
   }
 
   // Bind the quote to the exact transaction message before the wallet signs it.
@@ -238,6 +240,65 @@ async function createQuote(player, input) {
     amountAtomic: amountAtomic.toString(),
     seasonId: season?.id || null,
   };
+}
+
+async function diagnosticRead(read) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(read),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Balance check timed out')), 2500); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
+// Diagnostics run only after simulation fails. They never change or submit the
+// transaction, and a failed RPC lookup is not treated as a zero balance.
+async function describePreparationFailure({ connection, wallet, source, destination, message, amountAtomic, currency }) {
+  const [walletResult, feeResult, sourceResult, destinationResult] = await Promise.allSettled([
+    diagnosticRead(() => connection.getBalance(wallet, 'confirmed')),
+    diagnosticRead(() => connection.getFeeForMessage(message, 'confirmed')),
+    source ? diagnosticRead(() => connection.getAccountInfo(source, 'confirmed')) : Promise.resolve(null),
+    destination ? diagnosticRead(() => connection.getAccountInfo(destination, 'confirmed')) : Promise.resolve(null),
+  ]);
+  let tokenShort = false;
+  if (source && sourceResult.status === 'fulfilled') {
+    if (sourceResult.value === null) tokenShort = true;
+    else {
+      try {
+        const result = await diagnosticRead(() => connection.getTokenAccountBalance(source, 'confirmed'));
+        const amount = result?.value?.amount;
+        if (typeof amount === 'string' && /^\d+$/.test(amount)) tokenShort = BigInt(amount) < amountAtomic;
+      } catch { /* The account may be unavailable or invalid; do not invent a balance. */ }
+    }
+  }
+  let solShort = false, accountSetup = false;
+  if (walletResult.status === 'fulfilled' && Number.isSafeInteger(walletResult.value) && walletResult.value >= 0) {
+    const balance = BigInt(walletResult.value);
+    const feeValue = feeResult.status === 'fulfilled' ? feeResult.value?.value : null;
+    const fee = Number.isSafeInteger(feeValue) && feeValue >= 0 ? BigInt(feeValue) : null;
+    const transfer = currency === 'sol' ? amountAtomic : 0n;
+    solShort = balance < transfer || (fee !== null && balance < transfer + fee);
+    if (!solShort && source && fee !== null && destinationResult.status === 'fulfilled' && destinationResult.value === null) {
+      try {
+        // Token accounts cannot require less than the base account size; token
+        // extensions can require more, so this is a conservative lower bound.
+        const rent = await diagnosticRead(() => connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE, 'confirmed'));
+        if (Number.isSafeInteger(rent) && rent >= 0 && balance < fee + BigInt(rent)) {
+          solShort = true; accountSetup = true;
+        }
+      } catch { /* Unknown setup cost is not evidence of insufficient SOL. */ }
+    }
+  }
+  const problems = [];
+  if (tokenShort) {
+    const ticker = currency === 'skr' ? 'SKR' : currency === 'play' ? 'PLAY' : 'BATC';
+    problems.push(`Not enough ${ticker} in the payment account for this purchase.`);
+  }
+  if (solShort) problems.push(currency === 'sol'
+    ? 'Not enough SOL to cover the purchase and network fees.'
+    : accountSetup ? 'Not enough SOL for network fees and token account setup.' : 'Not enough SOL for network fees.');
+  return problems.length ? problems.join(' ') : 'The payment could not be prepared. Please try again.';
 }
 
 // Read-only wallet balances use the selected chain. Devnet's SKR replacement is
