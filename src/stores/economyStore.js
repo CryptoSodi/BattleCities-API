@@ -22,7 +22,8 @@ function withAccountMutation(player, operation) {
 const SHOP_STARTING_TOKEN_BALANCE = 0;
 const SHOP_STARTING_SOL_BALANCE = 0;
 const SHOP_STARTING_FUEL_BALANCE = 5;
-const FUEL_REFILL_INTERVAL_MS = 30 * 60 * 1000;
+const FUEL_REFILL_INTERVAL_MS = 6 * 60 * 1000;
+const REFERRED_FUEL_REFILL_INTERVAL_MS = 5 * 60 * 1000;
 const SHOP_CATALOG = {
   'fuel-one': { price: 150, solPrice: 0.01, fuel: 1 },
   'fuel-five': { price: 600, solPrice: 0.04, fuel: 5 },
@@ -140,21 +141,43 @@ async function ensureAccountForPlayer(player) {
 
 async function refillFuel(account) {
   const now = Date.now();
-  const previous = Date.parse(account.fuelRefillAt);
-  const intervals = Math.floor((now - previous) / FUEL_REFILL_INTERVAL_MS);
-  if (intervals < 1) return account;
-  const refillCap = SHOP_STARTING_FUEL_BALANCE + (await referralStore.hasReferrer(account.playerId) ? 1 : 0);
-  const amount = Math.max(0, refillCap - account.fuelBalance);
+  let checkpoint = Date.parse(account.fuelRefillAt);
+  const referralAt = Date.parse(await referralStore.referrerCreatedAt(account.playerId));
+  const referred = Number.isFinite(referralAt) && referralAt <= now;
+  const refillCap = SHOP_STARTING_FUEL_BALANCE + (referred ? 1 : 0);
+  const interval = referred ? REFERRED_FUEL_REFILL_INTERVAL_MS : FUEL_REFILL_INTERVAL_MS;
+  let intervals = 0, beforeReferral = 0;
+  if (referred && checkpoint < referralAt) {
+    beforeReferral = Math.max(0, Math.floor((referralAt - checkpoint) / FUEL_REFILL_INTERVAL_MS));
+    intervals += beforeReferral;
+    checkpoint += beforeReferral * FUEL_REFILL_INTERVAL_MS;
+    // The faster interval cannot award fuel before the referral existed.
+    const first = Math.max(referralAt, checkpoint + interval);
+    if (now >= first) {
+      const afterReferral = 1 + Math.floor((now - first) / interval);
+      intervals += afterReferral;
+      checkpoint = first + (afterReferral - 1) * interval;
+    }
+  } else {
+    intervals = Math.max(0, Math.floor((now - checkpoint) / interval));
+    checkpoint += intervals * interval;
+  }
+  const beforeAmount = Math.min(beforeReferral, Math.max(0, SHOP_STARTING_FUEL_BALANCE - account.fuelBalance));
+  const amount = beforeAmount + Math.min(intervals - beforeReferral, Math.max(0, refillCap - account.fuelBalance - beforeAmount));
   // Advance even when full: unused intervals never become banked grants.
-  account.fuelRefillAt = new Date(previous + intervals * FUEL_REFILL_INTERVAL_MS).toISOString();
-  account.fuelBalance += amount;
-  account.updatedAt = new Date(now).toISOString();
-  await writeAccount(account);
-  if (amount > 0) await ledgerStore.appendEntries({
-    playerId: account.playerId, walletAddress: account.walletAddress,
-    currency: 'fuel', amount, reason: 'thirty-minute-fuel-refill',
-    sourceType: 'fuel-refill', sourceId: account.fuelRefillAt,
-  });
+  if (intervals > 0) {
+    account.fuelRefillAt = new Date(checkpoint).toISOString();
+    account.fuelBalance += amount;
+    account.updatedAt = new Date(now).toISOString();
+    await writeAccount(account);
+    if (amount > 0) await ledgerStore.appendEntries({
+      playerId: account.playerId, walletAddress: account.walletAddress,
+      currency: 'fuel', amount, reason: 'gradual-fuel-refill',
+      sourceType: 'fuel-refill', sourceId: account.fuelRefillAt,
+    });
+  }
+  account.fuelRefill = { cap: refillCap, intervalSeconds: interval / 1000,
+    nextAt: new Date(checkpoint + interval).toISOString(), serverTime: new Date(now).toISOString() };
   return account;
 }
 
@@ -606,6 +629,7 @@ function toPublicAccount(account) {
     tokenBalance: normalized.tokenBalance,
     solBalance: normalized.solBalance,
     fuelBalance: normalized.fuelBalance,
+    ...(account.fuelRefill ? { fuelRefill: account.fuelRefill } : {}),
     inventory: normalized.inventory,
     loadout: normalized.loadout,
     createdAt: normalized.createdAt,

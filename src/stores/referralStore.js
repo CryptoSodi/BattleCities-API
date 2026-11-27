@@ -119,6 +119,11 @@ async function hasReferrer(playerId) {
   if (!storageConfig.hasDatabaseConfig()) return !!(await readLocal()).referrals[playerId];
   return (await database.getPool().query('SELECT 1 FROM battlecity_referrals WHERE referred_player_id=$1', [playerId])).rowCount > 0;
 }
+async function referrerCreatedAt(playerId) {
+  if (!storageConfig.hasDatabaseConfig()) return (await readLocal()).referrals[playerId]?.createdAt || null;
+  const result = await database.getPool().query('SELECT created_at FROM battlecity_referrals WHERE referred_player_id=$1', [playerId]);
+  return result.rowCount ? new Date(result.rows[0].created_at).toISOString() : null;
+}
 async function accruePayment(record) {
   const amount = (BigInt(record.amountAtomic) / 100n).toString();
   if (!storageConfig.hasDatabaseConfig()) return mutateLocal(data => {
@@ -131,4 +136,4 @@ async function accruePayment(record) {
     WHERE referred_player_id=$4 AND created_at <= $5 ON CONFLICT (payment_signature) DO NOTHING`,
     [record.signature, record.currency, amount, record.playerId, record.eligibleAt || record.confirmedAt, record.network, record.mint, record.tokenProgram, record.decimals]);
 }
-module.exports = { ensureProfile, dismissPrompt, applyCode, hasReferrer, accruePayment, codeFromInput, formatAmount };
+module.exports = { ensureProfile, dismissPrompt, applyCode, hasReferrer, referrerCreatedAt, accruePayment, codeFromInput, formatAmount };

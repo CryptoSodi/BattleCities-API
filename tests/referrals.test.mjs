@@ -45,9 +45,16 @@ test('a referral is permanent, refills to six, and accrues each confirmed paymen
     await Promise.all(Array.from({length:5},()=>referrals.applyCode(second,one.link)));
     await assert.rejects(referrals.applyCode(second,thirdProfile.code),/already been applied/);
     assert.equal((await referrals.ensureProfile(second)).referred,true);
-    Date.now=()=>starts+30*60*1000-1;
+    Date.now=()=>starts+5*60*1000-1;
     assert.equal((await economy.ensureAccountForPlayer(second)).fuelBalance,5);
-    Date.now=()=>starts+30*60*1000;
+    Date.now=()=>starts+5*60*1000+100;
+    assert.equal((await economy.ensureAccountForPlayer(second)).fuelBalance,6);
+    await economy.upsertAccountForPlayer(second, { fuelBalance: 0 });
+    Date.now=()=>starts+10*60*1000+100;
+    const gradual=await economy.ensureAccountForPlayer(second);
+    assert.equal(gradual.fuelBalance,1);
+    assert.equal(economy.toPublicAccount(gradual).fuelRefill.intervalSeconds,300);
+    Date.now=()=>starts+35*60*1000+100;
     assert.equal((await economy.ensureAccountForPlayer(second)).fuelBalance,6);
     await economy.creditFuel(second,10);
     Date.now=()=>starts+60*60*1000;
